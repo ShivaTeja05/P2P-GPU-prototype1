@@ -179,6 +179,45 @@ def docker_available() -> bool:
         return False
 
 
+def start_docker_desktop(wait_s: int = 120) -> bool:
+    """Try to start Docker Desktop, then wait for the engine to accept commands.
+
+    'Docker is installed but not running' was the most common stall in testing,
+    and telling someone to go find an icon is exactly the manual step the app is
+    supposed to remove. Docker Desktop 4.37+ ships a CLI for this; older
+    versions get launched the platform's usual way.
+    """
+    if docker_available():
+        return True
+
+    system = platform.system()
+    launchers: list[list[str]] = []
+    if shutil.which("docker"):
+        launchers.append(["docker", "desktop", "start"])
+    if system == "Darwin":
+        launchers.append(["open", "-a", "Docker"])
+    elif system == "Windows":
+        launchers.append(
+            ["cmd", "/c", "start", "", r"C:\Program Files\Docker\Docker\Docker Desktop.exe"]
+        )
+    elif system == "Linux":
+        # Desktop-Linux users may have Docker Desktop; server users have a
+        # daemon we are not allowed to start without root, so this may no-op.
+        launchers.append(["systemctl", "--user", "start", "docker-desktop"])
+
+    for cmd in launchers:
+        try:
+            _run(cmd, timeout=60)
+        except (subprocess.SubprocessError, OSError):
+            continue
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if docker_available():
+                return True
+            time.sleep(3)
+    return docker_available()
+
+
 def nvidia_runtime_registered() -> bool:
     """Cheap check that the NVIDIA Container Toolkit is wired into Docker.
 

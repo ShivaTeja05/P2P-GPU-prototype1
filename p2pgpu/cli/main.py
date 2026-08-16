@@ -87,6 +87,45 @@ def probe() -> None:
 
 
 @app.command()
+def prepare(
+    image: str = typer.Option("", help="Image to pre-download (default: auto-detected)."),
+) -> None:
+    """Do the slow parts now, so sharing later is instant.
+
+    Starts Docker if needed and downloads the session image. Run this once at
+    install time -- otherwise the multi-GB download lands the moment someone
+    actually wants to use the GPU, which is the worst possible moment.
+    """
+    from p2pgpu.worker import gpu_compat, share as sharing
+
+    if not sharing.docker_available():
+        console.print("Docker is not running. Starting it...")
+        if sharing.start_docker_desktop():
+            console.print("[green]Docker is up.[/]")
+        else:
+            console.print("[red]Could not start Docker. Start Docker Desktop manually.[/]")
+            raise typer.Exit(1)
+    else:
+        console.print("[green]Docker is running.[/]")
+
+    chosen, reason = sharing.resolve_image(image or None, "all")
+    console.print(f"image: [cyan]{chosen}[/] [dim]({reason})[/]")
+
+    if sharing.image_present(chosen):
+        console.print("[green]Image already downloaded. Sharing will start in seconds.[/]")
+        return
+
+    console.print("\n[yellow]Downloading the session image. This is the one big wait.[/]")
+    console.print("[dim]Several GB, once only. Progress below.[/]\n")
+    try:
+        sharing.pull_image(chosen)
+    except sharing.ShareError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    console.print("\n[green]Ready. Future shares start in seconds.[/]")
+
+
+@app.command()
 def share(
     hours: float = typer.Option(4.0, help="Auto-stop after this many hours."),
     image: str = typer.Option("", help="Override the container image (default: auto-detected)."),
@@ -110,6 +149,10 @@ def share(
     is mounted. The share stops itself when the time is up.
     """
     from p2pgpu.worker import gpu_compat, share as sharing
+
+    if not skip_checks and not sharing.docker_available():
+        console.print("[dim]Docker is not running. Starting it...[/]")
+        sharing.start_docker_desktop()
 
     if not skip_checks:
         problems, warnings = sharing.preflight(
