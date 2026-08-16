@@ -22,17 +22,17 @@ Entry format:
 | Node identity + shared token | done |
 | GPU / capability probing (CUDA, Metal, CPU) | done |
 | Link benchmark + transfer estimates | done |
-| `p2pgpu share` — GPU passthrough container | done, untested on real NVIDIA hardware |
+| `p2pgpu share` — GPU passthrough container | **working on real NVIDIA hardware** |
 | `p2pgpu attach` — guest connection | done |
 | `p2pgpu doctor` — host preflight | done |
-| Real two-machine run | **pending — needs the friend's PC** |
+| Real two-machine run | **done — 2026-08-16, Mac ↔ RTX 4050, two states apart** |
 
 **Machines**
 
 | Role | Machine | Backend | Notes |
 |---|---|---|---|
 | guest | MacBook Pro M3 Pro, 36 GB | mps | control machine |
-| host | friend's PC, RTX 40-series | cuda | not yet set up |
+| host | Lenovo LOQ, RTX 4050 Laptop 6 GB, Win 11 | cuda | working |
 
 ---
 
@@ -55,6 +55,48 @@ share-invite step (easy to skip entirely, and nothing works without it), and
 installing Linux NVIDIA drivers inside WSL.
 
 **Next:** unchanged — friend runs Setup.bat, then Check-Setup.bat.
+
+---
+
+## 2026-08-16 — IT WORKS: first real cross-state GPU share
+
+**Status:** End to end verified. A MacBook ran PyTorch on an RTX 4050 in
+another state.
+
+**Measured, on the real link:**
+```
+hostname     : 68443f1941d8            (container on his laptop)
+torch        : 2.5.1+cu124 | cuda 12.4
+cuda avail   : True
+GPU          : NVIDIA GeForce RTX 4050 Laptop GPU
+capability   : 8.9
+VRAM         : 6.0 GB total / 5.0 GB free
+matmul == cpu: True
+```
+- Tailscale: `active; direct`, 84-110 ms RTT, no relay. NAT traversal worked
+  first try on both home routers.
+- Image auto-selection chose `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel`
+  from cc 8.9 + driver 610.88 — correct, and the CPU-reference matmul proves
+  the kernels actually match the card.
+- Jupyter answered HTTP 200; kernel started and executed remotely.
+
+**What the live run cost us (bugs only real hardware found):**
+- *900 s timeout covering the image pull.* `docker run -d` was doing the pull,
+  so one timeout had to cover a 7-9 GB download. Split into `pull_image()`
+  with a 2 h budget and docker's own progress bars, since a detached run is
+  silent and the owner just sees a frozen prompt.
+- *`uv venv` prompts when `.venv` exists.* Re-running Setup.bat is normal
+  (reboot after Docker, retry after a fix) and it stalled behind an
+  unexpected question. Now reuses the environment.
+- *Tailscale not on PATH on Windows*, *backslashes in the `-v` argument*, and
+  *the NVIDIA-runtime check false-negative on Windows* — all found earlier the
+  same day, all confirmed fixed by this run.
+
+**Still true:** 6 GB VRAM is the real ceiling. Good for LoRA on small models
+and 7B at 4-bit; not for anything larger.
+
+**Next:** send the updated build to the host so his next share gets pull
+progress, readiness waiting and SSH.
 
 ---
 
