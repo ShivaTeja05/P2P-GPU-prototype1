@@ -1,6 +1,6 @@
 [project]
 name = "p2pgpu"
-version = "0.1.0"
+version = "1.0.0"
 description = "Share one GPU between two computers over an encrypted overlay network"
 requires-python = ">=3.10,<3.13"
 dependencies = [
