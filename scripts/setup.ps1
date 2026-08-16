@@ -43,6 +43,18 @@ function Find-Tailscale {
     return $null
 }
 
+# A freshly installed program is not on this session's PATH -- the installer
+# updates the registry, but the environment block of an already-running process
+# is a snapshot taken at launch. Without this, installing Python or uv and then
+# using it in the same run fails with "not recognized", and the user is told to
+# close and reopen the window. Re-reading the registry avoids that entirely.
+function Update-SessionPath {
+    $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user    = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $extra   = "$env:LOCALAPPDATA\Microsoft\WinGet\Links;$env:USERPROFILE\.local\bin"
+    $env:Path = (@($machine, $user, $extra) | Where-Object { $_ }) -join ';'
+}
+
 function Invoke-Winget($id, $label) {
     if (-not (Test-Command 'winget')) {
         Write-Bad "winget is not available. Install $label manually."
@@ -54,6 +66,7 @@ function Invoke-Winget($id, $label) {
         Write-Bad "winget could not install $label (exit $LASTEXITCODE). Install it manually."
         return $false
     }
+    Update-SessionPath
     Write-Ok "$label installed"
     return $true
 }
@@ -99,9 +112,9 @@ foreach ($candidate in @('python3.12', 'python3.11', 'python3.10', 'python')) {
 }
 if (-not $pythonOk) {
     Write-Miss 'No suitable Python found (need 3.10-3.12; PyTorch has no 3.13+ wheels yet)'
+    Write-Host '  Not fatal: uv can download its own Python if needed.' -ForegroundColor DarkGray
     if (Confirm-Install 'Python 3.12') {
         Invoke-Winget 'Python.Python.3.12' 'Python 3.12' | Out-Null
-        Write-Host '  You may need to reopen this window for PATH changes.' -ForegroundColor DarkGray
     }
 }
 
@@ -116,7 +129,7 @@ if (Test-Command 'uv') {
             Write-Host '  falling back to the official installer ...' -ForegroundColor DarkGray
             powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
         }
-        $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+        Update-SessionPath
     }
 }
 
@@ -135,7 +148,7 @@ if ($ts) {
     Write-Miss 'Tailscale not found'
     if (Confirm-Install 'Tailscale') {
         Invoke-Winget 'tailscale.tailscale' 'Tailscale' | Out-Null
-        Write-Host '  After install: sign in with the SAME account as the other machine.' -ForegroundColor DarkGray
+        Write-Host '  After install: sign in with YOUR OWN account (no need to share a login).' -ForegroundColor DarkGray
     }
 }
 

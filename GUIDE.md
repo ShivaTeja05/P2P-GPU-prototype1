@@ -56,10 +56,23 @@ install, and sign in with any account you like (Google, GitHub, Microsoft).
 
 ## Step A2 — Get this repo
 
-Go to the repo page → green **Code** button → **Download ZIP** → extract to a
-permanent folder like `C:\p2pgpu`.
+Go to the repo page → green **Code** button → **Download ZIP**.
+
+> ⚠️ **Before extracting, unblock the ZIP.** Right-click the downloaded file →
+> **Properties** → tick **Unblock** at the bottom → OK.
+>
+> Windows marks anything downloaded from the internet, and that mark is copied
+> to every extracted file. Skip this and the `.bat` files trigger a
+> "Windows protected your PC" warning. Unblocking the ZIP first fixes all of
+> them in one go.
+
+Now extract to a permanent folder like `C:\p2pgpu`.
 
 > ⚠️ Don't leave it in Downloads. The tool keeps a workspace folder next to it.
+
+**If the repo is private,** you need to be signed in to GitHub in your browser
+and have accepted the collaborator invite first — otherwise the page 404s. See
+[Getting access to a private repo](#getting-access-to-a-private-repo) below.
 
 Or, if you have git:
 
@@ -176,8 +189,12 @@ address.
 
 ## Step B3 — Get this repo and set it up
 
-**Windows:** Download ZIP, extract, double-click **`Setup-Guest-Only.bat`**
-*(skips Docker — you don't need it)*
+**Windows:** Download ZIP → right-click it → Properties → tick **Unblock** →
+extract → double-click **`Setup-Guest-Only.bat`** *(skips Docker — you don't
+need it)*
+
+If the repo is private, accept the collaborator invite first —
+[details below](#getting-access-to-a-private-repo).
 
 **Mac / Linux:**
 
@@ -230,6 +247,24 @@ That's it. Train something.
 
 ---
 
+## Getting access to a private repo
+
+If the owner keeps the repo private, they add you as a collaborator:
+
+1. Repo page → **Settings** → **Collaborators** → **Add people**
+2. Type your GitHub username or email → **Add**
+3. You get an email invite — **accept it** (or go to
+   [github.com/notifications](https://github.com/notifications))
+
+Once accepted, **Download ZIP** works normally in a browser where you're signed
+in. No tokens, no git, no command line.
+
+If you prefer git on Windows, [GitHub Desktop](https://desktop.github.com/) is
+the easiest option — it handles the login for you. Plain `git clone` over HTTPS
+will ask for a Personal Access Token, not your password.
+
+---
+
 ## Common problems
 
 ### "GPU is visible inside Docker" never appears (owner)
@@ -254,6 +289,12 @@ trust that result over the warning.
 2. Did you accept the share invite (Step B2)?
 3. Ask your friend to run `Sharing-Status.bat` — the share may have expired.
 4. `tailscale status` should list their machine.
+
+### "Windows protected your PC" when double-clicking a .bat
+
+Windows blocked it because it came from a downloaded ZIP. Best fix: delete the
+extracted folder, right-click the original **ZIP** → Properties → **Unblock** →
+extract again. Or click **More info → Run anyway** on the warning.
 
 ### "running scripts is disabled on this system" (Windows)
 
