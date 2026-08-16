@@ -304,6 +304,37 @@ def resolve_image(explicit: str | None, gpu_selection: str = "all") -> tuple[str
     return gpu_compat.recommend_image(profiles)
 
 
+def image_present(image: str) -> bool:
+    try:
+        return _run(["docker", "image", "inspect", image], timeout=60).returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def pull_image(image: str, timeout_s: int = 7200) -> None:
+    """Fetch the image, streaming docker's own progress to the terminal.
+
+    Pulling is deliberately separate from 'docker run'. Folding it into the run
+    meant one timeout had to cover both, and the PyTorch CUDA images are 7-9 GB
+    -- easily over 15 minutes on home internet. Worse, the pull is silent when
+    the container is started detached, so the owner sees a frozen prompt with no
+    indication that gigabytes are moving. Doing it here gives them docker's
+    progress bars and a timeout sized for the actual job.
+    """
+    if image_present(image):
+        return
+    try:
+        # No capture_output: docker's progress goes straight to the terminal.
+        result = subprocess.run(["docker", "pull", image], timeout=timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        raise ShareError(
+            f"Image pull exceeded {timeout_s // 60} minutes. The download may "
+            f"still be running in the background -- try again shortly."
+        ) from exc
+    if result.returncode != 0:
+        raise ShareError(f"Could not pull {image}. Check the image name and your connection.")
+
+
 def start_share(
     hours: float = 4.0,
     image: str | None = None,
@@ -386,10 +417,12 @@ def start_share(
         "bash", "-lc", inner,
     ]
 
+    pull_image(image)
+
     try:
-        result = _run(cmd, timeout=900)
+        result = _run(cmd, timeout=180)
     except subprocess.TimeoutExpired as exc:
-        raise ShareError("Timed out starting the container (image pull too slow?)") from exc
+        raise ShareError("Timed out starting the container.") from exc
 
     if result.returncode != 0:
         raise ShareError(f"docker run failed:\n{(result.stderr or result.stdout).strip()}")

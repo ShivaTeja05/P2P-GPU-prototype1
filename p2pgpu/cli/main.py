@@ -142,7 +142,12 @@ def share(
     for note in gpu_compat.compatibility_notes(gpu_compat.detect_gpus()):
         console.print(f"[yellow]note:[/] {note}")
     console.print(f"image: [cyan]{chosen_image}[/] [dim]({reason})[/]")
-    console.print(f"Starting share ({hours}h)... first run pulls the image, be patient.")
+    if not sharing.image_present(chosen_image):
+        console.print(
+            f"\n[yellow]The image is not downloaded yet ({chosen_image}).[/]\n"
+            "[dim]This is 7-9 GB and only happens once. Progress below.[/]\n"
+        )
+    console.print(f"Starting share ({hours}h)...")
     try:
         session = sharing.start_share(
             hours=hours,
