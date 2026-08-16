@@ -112,3 +112,22 @@ def test_tailscale_lookup_never_raises_when_absent():
 
     assert tailscale_exe() is None or isinstance(tailscale_exe(), str)
     assert tailscale_ip() is None or isinstance(tailscale_ip(), str)
+
+
+def test_ipv6_literals_are_bracketed_for_docker_and_urls():
+    """A bare IPv6 address next to a :port is ambiguous; RFC 3986 brackets fix it."""
+    from p2pgpu.worker.share import bracket_host, is_ipv6
+
+    assert is_ipv6("fd7a:115c:a1e0::e801:f4bb")
+    assert bracket_host("fd7a:115c:a1e0::e801:f4bb") == "[fd7a:115c:a1e0::e801:f4bb]"
+    # Already-bracketed input must not be double-wrapped.
+    assert bracket_host("[fd7a:115c::1]") == "[fd7a:115c::1]"
+
+
+def test_ipv4_and_hostnames_are_left_alone():
+    from p2pgpu.worker.share import bracket_host, is_ipv6
+
+    assert not is_ipv6("100.65.244.36")
+    assert bracket_host("100.65.244.36") == "100.65.244.36"
+    assert bracket_host("0.0.0.0") == "0.0.0.0"
+    assert bracket_host("localhost") == "localhost"

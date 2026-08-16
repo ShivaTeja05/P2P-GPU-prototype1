@@ -106,6 +106,23 @@ def tailscale_ip() -> str | None:
     return first[0].strip() if first else None
 
 
+def is_ipv6(address: str) -> bool:
+    """A bare IPv6 literal has multiple colons; IPv4 and hostnames have none."""
+    return address.count(":") > 1
+
+
+def bracket_host(address: str) -> str:
+    """Wrap an IPv6 literal in brackets so it can sit next to a :port.
+
+    Both Docker's -p flag and URL syntax parse on colons, so a bare
+    'fd7a:115c::1' followed by ':8888' is ambiguous. RFC 3986 brackets resolve
+    it, and Docker follows the same convention.
+    """
+    if is_ipv6(address) and not address.startswith("["):
+        return f"[{address}]"
+    return address
+
+
 def docker_mount_path(path: Path) -> str:
     """Render a host path for 'docker -v'.
 
@@ -298,7 +315,7 @@ def start_share(
         "-e", f"JUPYTER_TOKEN={token}",
         # Binding to the overlay IP, not 0.0.0.0, keeps this off the host's LAN
         # and off the public internet even if a router is misconfigured.
-        "-p", f"{ip}:{port}:{port}",
+        "-p", f"{bracket_host(ip)}:{port}:{port}",
         "-v", f"{docker_mount_path(WORKSPACE)}:/workspace",
         "-w", "/workspace",
         image,
@@ -314,7 +331,7 @@ def start_share(
         raise ShareError(f"docker run failed:\n{(result.stderr or result.stdout).strip()}")
 
     session = ShareSession(
-        url=f"http://{ip}:{port}/lab?token={token}",
+        url=f"http://{bracket_host(ip)}:{port}/lab?token={token}",
         token=token,
         bind_ip=ip,
         port=port,
