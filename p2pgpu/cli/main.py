@@ -174,6 +174,55 @@ def join(
     console.print("Use someone's:   [cyan]p2pgpu connect[/]")
 
 
+service_app = typer.Typer(help="Run the agent automatically in the background.")
+app.add_typer(service_app, name="service")
+
+
+@service_app.command("install")
+def service_install() -> None:
+    """Start the agent at login, in the background, and keep it running.
+
+    Registers with your OS's own service manager -- launchd on macOS, systemd
+    on Linux, Task Scheduler on Windows. All per-user, so no admin rights.
+    """
+    from p2pgpu.worker import service
+
+    console.print(f"Registering with [cyan]{service.manager_name()}[/]...")
+    try:
+        console.print(f"[green]{service.install()}[/]")
+    except service.ServiceError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    console.print("The agent now starts on its own. Peers can find this machine.")
+
+
+@service_app.command("uninstall")
+def service_uninstall() -> None:
+    """Stop the agent starting automatically."""
+    from p2pgpu.worker import service
+
+    try:
+        console.print(f"[green]{service.uninstall()}[/]")
+    except service.ServiceError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+
+
+@service_app.command("status")
+def service_status() -> None:
+    """Is the background agent running?"""
+    from p2pgpu.worker import service
+
+    table = Table(show_header=False)
+    table.add_row("manager", service.manager_name())
+    running = service.is_running()
+    table.add_row("agent", "[green]running[/]" if running else "[yellow]not running[/]")
+    table.add_row("command", " ".join(service.agent_command()))
+    console.print(table)
+    if not running:
+        console.print("\nStart it with [cyan]p2pgpu service install[/]")
+
+
 @app.command()
 def probe() -> None:
     """Show what compute this machine has."""
@@ -679,7 +728,7 @@ def agent(
     from p2pgpu.worker.agent import serve as run_server
 
     console.print(f"agent [cyan]{node_id()}[/] listening on {host}:{port}")
-    run_server(host=host, port=port)
+    raise typer.Exit(run_server(host=host, port=port))
 
 
 def _render_caps(caps: NodeCapabilities) -> None:

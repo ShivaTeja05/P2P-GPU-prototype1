@@ -26,6 +26,10 @@ Entry format:
 | `p2pgpu attach` — guest connection | done |
 | `p2pgpu doctor` — host preflight | done |
 | Real two-machine run | **done — 2026-08-16, Mac ↔ RTX 4050, two states apart** |
+| Auto-discovery (no URL passing) | done |
+| One-code join (`invite` / `join`) | done, untested on a live tailnet |
+| Background agent as an OS service | done, verified on macOS |
+| Released | **v1.0.0 tagged** |
 
 **Machines**
 
@@ -55,6 +59,53 @@ share-invite step (easy to skip entirely, and nothing works without it), and
 installing Linux NVIDIA drivers inside WSL.
 
 **Next:** unchanged — friend runs Setup.bat, then Check-Setup.bat.
+
+---
+
+## 2026-08-16 — v1.1 work: automation pass (branch `v1.1-authkey`)
+
+**Status:** v1.0.0 tagged on `main`. Automation continuing on a branch so the
+working version stays safe.
+
+**Changed, in order:**
+1. **Auto-discovery.** `p2pgpu discover` / `connect` find shared GPUs by asking
+   Tailscale's local API for peers and probing them in parallel. No coordinator,
+   no accounts. Agent gained `/v1/share`.
+2. **`p2pgpu prepare`** moves the multi-GB pull to install time, and
+   `start_docker_desktop()` launches the engine instead of telling someone to
+   go find a tray icon.
+3. **`docker/`** — a purpose-built session image with jupyterlab and sshd baked
+   into layers, on a `-runtime` base.
+4. **v1.0.0 released** with `CHANGELOG.md`.
+5. **Join codes.** `p2pgpu invite` → one code → `p2pgpu join <code>` does the
+   tailnet join, the token, and the image pull.
+6. **Background service.** `p2pgpu service install` registers with launchd,
+   systemd or Task Scheduler.
+
+**Why the join code exists:** setting up the second machine was eight steps, and
+the one people actually missed was buried in a web console. All of it is really
+two secrets moving between two people, so the code carries both — a Tailscale
+auth key and the cluster token. Because both machines then join the *same*
+tailnet, node sharing stops being necessary at all.
+
+**Bugs found and fixed this pass:**
+- *launchd crash loop.* `KeepAlive=true` restarts on **any** exit, so an agent
+  that could not bind its port respawned forever, burning CPU with nothing
+  visible to the user. Found by installing the service on this Mac while a
+  stale agent from earlier still held 8777. Now `KeepAlive` only fires on
+  failure, and the agent detects an existing healthy agent and exits 0.
+- *Every image was a `-devel` tag* — 7-9 GB versus ~4 GB for `-runtime`, for
+  nvcc and CUDA headers a training session never touches. This is the download
+  that hurt most in the live run.
+- *`discovery._tailscale_exe`* had `x if shutil.which else x`: identical
+  branches, condition always truthy. Dead code that read like a real check.
+- *`agent` and `serve`* were duplicate commands.
+- *`prepare`* imported `gpu_compat` and never used it.
+
+**Measured:** 56 tests. Service verified on macOS — installs, serves,
+auto-restarts on crash, exits cleanly when already running, survives `kill`.
+
+**Next:** publish the session image; single installer; then the GUI.
 
 ---
 

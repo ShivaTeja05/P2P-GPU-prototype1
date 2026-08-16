@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import sys
 import time
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -109,7 +110,50 @@ def bench_source(size_bytes: int = 8 * 1024 * 1024) -> Response:
     return Response(content=os.urandom(size_bytes), media_type="application/octet-stream")
 
 
-def serve(host: str = "0.0.0.0", port: int = 8777) -> None:
+def port_owner(port: int, host: str = "127.0.0.1") -> str | None:
+    """If something is listening, say what. None means the port is free.
+
+    Returns "p2pgpu" when a healthy agent already holds it, "other" for anything
+    else. The distinction matters: one is idempotent, the other is a conflict.
+    """
+    import socket
+
+    import httpx
+
+    with socket.socket() as sock:
+        sock.settimeout(2)
+        if sock.connect_ex((host, port)) != 0:
+            return None
+    try:
+        resp = httpx.get(f"http://{host}:{port}/health", timeout=3)
+        if resp.status_code == 200 and "node_id" in resp.json():
+            return "p2pgpu"
+    except Exception:
+        pass
+    return "other"
+
+
+def serve(host: str = "0.0.0.0", port: int = 8777) -> int:
+    """Run the agent. Returns a process exit code.
+
+    Exits 0 when an agent is already serving, so a service manager treats this
+    as "nothing to do" rather than a failure worth restarting forever. Under
+    launchd with KeepAlive that difference is the gap between idempotent and a
+    crash loop.
+    """
     import uvicorn
 
+    owner = port_owner(port)
+    if owner == "p2pgpu":
+        print(f"An agent is already serving on port {port}. Nothing to do.")
+        return 0
+    if owner == "other":
+        print(
+            f"Port {port} is in use by something that is not a p2pgpu agent.\n"
+            f"Free it, or start the agent elsewhere with --port.",
+            file=sys.stderr,
+        )
+        return 1
+
     uvicorn.run(app, host=host, port=port, log_level="info")
+    return 0

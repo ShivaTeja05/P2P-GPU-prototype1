@@ -63,6 +63,25 @@ Things a test suite never would have caught:
 
 ---
 
-## Unreleased
+## Unreleased — branch `v1.1-authkey`
+
+### Added
+- `p2pgpu invite` / `join` — one code carries the Tailscale auth key and the
+  cluster token, replacing eight setup steps including the admin-console share
+- `p2pgpu discover` / `connect` — find shared GPUs on the tailnet, no URLs
+- `p2pgpu prepare` — download the session image at install time, not at use time
+- `p2pgpu service install` — background agent via launchd / systemd / Task Scheduler
+- `docker/` — purpose-built session image, jupyterlab and sshd baked in
+- Docker Desktop is started automatically when it is installed but not running
+
+### Fixed
+- launchd crash loop: `KeepAlive=true` respawned an agent that could not bind
+  its port, forever. Now restarts only on failure, and the agent exits 0 when
+  another healthy agent is already serving
+- Default images were `-devel` (7–9 GB) instead of `-runtime` (~4 GB)
+- `discovery._tailscale_exe` had two identical branches behind a condition that
+  was always true
+- `agent` and `serve` were duplicate commands
+- Unused import in `prepare`
 
 Working toward v2: single installer, GUI, and multi-GPU clustering.
