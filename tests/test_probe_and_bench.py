@@ -179,3 +179,76 @@ def test_garbage_rejected():
     for junk in ["", "hello world", "not-a-key AAAA"]:
         with _pytest.raises(ShareError):
             validate_ssh_key(junk)
+
+
+# --- join codes ------------------------------------------------------------
+
+
+def test_join_code_round_trips():
+    from p2pgpu.common import joincode
+
+    original = joincode.build("tskey-auth-kAbC123-xyz", "sekrit-cluster-token")
+    decoded = joincode.decode(original.encode())
+    assert decoded.tailscale_authkey == "tskey-auth-kAbC123-xyz"
+    assert decoded.cluster_token == "sekrit-cluster-token"
+
+
+def test_join_code_survives_chat_app_mangling():
+    """Codes get pasted through WhatsApp, which wraps and pads whitespace."""
+    from p2pgpu.common import joincode
+
+    code = joincode.build("tskey-auth-abc123", "tok").encode()
+    mangled = f"  {code[:20]}\n{code[20:]}  \n"
+    assert joincode.decode(mangled).cluster_token == "tok"
+
+
+def test_join_code_rejects_a_private_looking_key():
+    import pytest as _pytest
+
+    from p2pgpu.common import joincode
+
+    with _pytest.raises(joincode.JoinCodeError, match="Tailscale auth key"):
+        joincode.build("hunter2", "tok")
+
+
+def test_join_code_rejects_garbage_with_actionable_messages():
+    import pytest as _pytest
+
+    from p2pgpu.common import joincode
+
+    with _pytest.raises(joincode.JoinCodeError, match="starts with"):
+        joincode.decode("just-some-text")
+    with _pytest.raises(joincode.JoinCodeError, match="corrupted"):
+        joincode.decode("p2pgpu1-!!!!not-base64!!!!")
+    with _pytest.raises(joincode.JoinCodeError, match="No join code"):
+        joincode.decode("   ")
+
+
+def test_join_code_version_mismatch_is_explained():
+    import base64
+    import json
+
+    import pytest as _pytest
+
+    from p2pgpu.common import joincode
+
+    payload = json.dumps({"v": 99, "ts": "tskey-auth-x", "tok": "t"}).encode()
+    future = joincode.PREFIX + base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    with _pytest.raises(joincode.JoinCodeError, match="version 99"):
+        joincode.decode(future)
+
+
+def test_join_code_is_urlsafe_so_chat_apps_do_not_break_it():
+    from p2pgpu.common import joincode
+
+    code = joincode.build("tskey-auth-" + "A" * 60, "t" * 60).encode()
+    assert "+" not in code and "/" not in code and "=" not in code
+
+
+def test_default_images_are_runtime_not_devel():
+    """Devel doubles the download for nvcc that a training session never uses."""
+    from p2pgpu.worker.gpu_compat import FALLBACK_IMAGE, IMAGE_MATRIX
+
+    for _cc, _drv, image, _note in IMAGE_MATRIX:
+        assert image.endswith("-runtime"), image
+    assert FALLBACK_IMAGE.endswith("-runtime")

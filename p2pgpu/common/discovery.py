@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import shutil
 import subprocess
 from dataclasses import dataclass
 
@@ -62,7 +61,7 @@ class DiscoveredShare:
 def _tailscale_exe() -> str | None:
     from p2pgpu.worker.share import tailscale_exe
 
-    return tailscale_exe() if shutil.which else tailscale_exe()
+    return tailscale_exe()
 
 
 def list_peers(include_offline: bool = False) -> list[Peer]:

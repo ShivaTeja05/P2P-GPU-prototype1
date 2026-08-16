@@ -40,29 +40,34 @@ ARCHITECTURES: list[tuple[float, str, str]] = [
     (12.0, "Blackwell", "RTX 50-series"),
 ]
 
+# The '-runtime' variants, not '-devel'. Devel carries nvcc and the CUDA
+# headers -- roughly double the download -- and those are only needed to
+# *compile* CUDA extensions, not to train. Anyone who needs them can pass
+# --image. Halving a 7-9 GB first-run download matters more than the rare case.
+#
 # Ordered most-capable first. Each entry: (min_cc, min_driver, image, note).
 IMAGE_MATRIX: list[tuple[float, tuple[int, int, int], str, str]] = [
     (
         12.0,
         CUDA12_MIN_DRIVER,
-        "pytorch/pytorch:2.7.1-cuda12.8-cudnn9-devel",
+        "pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime",
         "Blackwell (sm_120) needs PyTorch >= 2.7 built against CUDA 12.8",
     ),
     (
         7.0,
         CUDA12_MIN_DRIVER,
-        "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel",
+        "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime",
         "modern default for Turing through Hopper",
     ),
     (
         6.0,
         CUDA11_MIN_DRIVER,
-        "pytorch/pytorch:2.1.2-cuda11.8-cudnn8-devel",
+        "pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime",
         "older driver or Pascal card; last comfortable CUDA 11 line",
     ),
 ]
 
-FALLBACK_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
+FALLBACK_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
 
 
 @dataclass

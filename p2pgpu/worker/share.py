@@ -22,14 +22,14 @@ import secrets
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from p2pgpu.common.config import CONFIG_DIR
 from p2pgpu.worker import gpu_compat
 
 CONTAINER_NAME = "p2pgpu-share"
-DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
+DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
 DEFAULT_PORT = 8888
 SESSION_FILE = CONFIG_DIR / "share_session.json"
 
@@ -141,6 +141,40 @@ def tailscale_ip() -> str | None:
         return None
     first = result.stdout.strip().splitlines()
     return first[0].strip() if first else None
+
+
+def tailscale_up(authkey: str, timeout_s: int = 120) -> tuple[bool, str]:
+    """Join a tailnet using a pre-authorised key -- no browser, no admin console.
+
+    On Linux and macOS this touches privileged networking state and usually
+    needs sudo; on Windows the service is already elevated. We report the
+    permission failure plainly rather than pretending it worked.
+    """
+    exe = tailscale_exe()
+    if exe is None:
+        return False, (
+            "Tailscale is not installed. Get it from https://tailscale.com/download"
+        )
+
+    cmd = [exe, "up", f"--auth-key={authkey}", "--accept-routes"]
+    if platform.system() != "Windows" and shutil.which("sudo"):
+        cmd = ["sudo", "-n", *cmd]  # -n: fail rather than hang on a password prompt
+
+    try:
+        result = _run(cmd, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        return False, "tailscale up timed out"
+    except OSError as exc:
+        return False, str(exc)
+
+    if result.returncode == 0:
+        return True, (result.stdout or "joined").strip()
+
+    detail = (result.stderr or result.stdout).strip()
+    if "sudo" in detail.lower() or "permission" in detail.lower() or "password" in detail.lower():
+        plain = " ".join(c for c in cmd if c not in ("sudo", "-n"))
+        return False, f"Needs elevated permissions. Run this yourself:\n    sudo {plain}"
+    return False, detail
 
 
 def is_ipv6(address: str) -> bool:
@@ -387,7 +421,7 @@ def start_share(
     """Launch the shared GPU container and return the session details."""
     if container_running():
         raise ShareError(
-            f"A share is already running. Stop it first with 'p2pgpu stop'."
+            "A share is already running. Stop it first with 'p2pgpu stop'."
         )
 
     try:

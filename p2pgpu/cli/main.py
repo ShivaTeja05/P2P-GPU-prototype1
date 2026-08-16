@@ -74,6 +74,107 @@ def init(
 
 
 @app.command()
+def invite(
+    authkey: str = typer.Option("", help="Tailscale auth key (tskey-auth-...)."),
+) -> None:
+    """Create a join code to send to whoever is joining your cluster.
+
+    One paste on their side replaces installing, browser sign-in, the admin
+    console, the share invite and the token exchange.
+
+    Get a reusable auth key at
+    https://login.tailscale.com/admin/settings/keys -- tick Reusable, and add a
+    tag so it does not expire in 90 days.
+    """
+    from p2pgpu.common import joincode
+
+    token = cluster_token()
+    if token is None:
+        console.print("[yellow]No cluster token yet, creating one...[/]")
+        token = generate_token()
+        write_cluster_token(token)
+
+    if not authkey:
+        console.print(
+            "\nCreate a Tailscale auth key first:\n"
+            "  [cyan]https://login.tailscale.com/admin/settings/keys[/]\n"
+            "  -> Generate auth key -> tick [bold]Reusable[/] -> Generate\n"
+        )
+        authkey = typer.prompt("Paste the auth key (tskey-auth-...)").strip()
+
+    try:
+        code = joincode.build(authkey, token)
+    except joincode.JoinCodeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+
+    console.print(Panel(code.encode(), title="join code", border_style="green"))
+    console.print("They run: [cyan]p2pgpu join <code>[/]  (or paste it into the app)")
+    console.print(
+        "\n[red]Treat this like a password.[/] Anyone holding it can put a "
+        "device on your tailnet."
+    )
+
+
+@app.command()
+def join(
+    code: str = typer.Argument("", help="The join code you were sent."),
+    prepare_image: bool = typer.Option(
+        True, "--prepare/--no-prepare", help="Also download the session image now."
+    ),
+) -> None:
+    """Join a cluster from a single code. Replaces the whole manual setup."""
+    from p2pgpu.common import joincode
+    from p2pgpu.worker import share as sharing
+
+    if not code:
+        code = typer.prompt("Paste your join code").strip()
+
+    try:
+        parsed = joincode.decode(code)
+    except joincode.JoinCodeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+
+    if parsed.issued_by:
+        console.print(f"[dim]code issued by {parsed.issued_by}[/]")
+
+    console.print("1/3  joining the tailnet...")
+    ok, detail = sharing.tailscale_up(parsed.tailscale_authkey)
+    if not ok:
+        console.print(f"[red]{detail}[/]")
+        raise typer.Exit(1)
+    ip = sharing.tailscale_ip()
+    console.print(f"     [green]connected[/]{f' as {ip}' if ip else ''}")
+
+    console.print("2/3  saving the cluster token...")
+    write_cluster_token(parsed.cluster_token)
+    console.print(f"     [green]saved[/] (node_id {node_id()})")
+
+    if prepare_image:
+        console.print("3/3  preparing Docker and the session image...")
+        if sharing.docker_available() or sharing.start_docker_desktop():
+            chosen, _ = sharing.resolve_image(None, "all")
+            if sharing.image_present(chosen):
+                console.print("     [green]image already downloaded[/]")
+            else:
+                console.print(f"     downloading [cyan]{chosen}[/] (several GB, once)")
+                try:
+                    sharing.pull_image(chosen)
+                    console.print("     [green]done[/]")
+                except sharing.ShareError as exc:
+                    console.print(f"     [yellow]{exc}[/]")
+        else:
+            console.print("     [yellow]Docker not available -- fine if you only borrow GPUs.[/]")
+    else:
+        console.print("3/3  [dim]skipped image download[/]")
+
+    console.print("\n[green]Joined.[/]")
+    console.print("Share your GPU:  [cyan]p2pgpu share[/]")
+    console.print("Use someone's:   [cyan]p2pgpu connect[/]")
+
+
+@app.command()
 def probe() -> None:
     """Show what compute this machine has."""
     from p2pgpu.worker.probe import probe as run_probe
@@ -96,7 +197,7 @@ def prepare(
     install time -- otherwise the multi-GB download lands the moment someone
     actually wants to use the GPU, which is the worst possible moment.
     """
-    from p2pgpu.worker import gpu_compat, share as sharing
+    from p2pgpu.worker import share as sharing
 
     if not sharing.docker_available():
         console.print("Docker is not running. Starting it...")
@@ -148,7 +249,8 @@ def share(
     your Tailscale address. Your files stay out of it -- only ~/p2pgpu-workspace
     is mounted. The share stops itself when the time is up.
     """
-    from p2pgpu.worker import gpu_compat, share as sharing
+    from p2pgpu.worker import gpu_compat
+    from p2pgpu.worker import share as sharing
 
     if not skip_checks and not sharing.docker_available():
         console.print("[dim]Docker is not running. Starting it...[/]")
@@ -350,7 +452,8 @@ def doctor(
     quick: bool = typer.Option(False, help="Skip the container GPU test (no image pull)."),
 ) -> None:
     """Check whether this machine can share its GPU, and say what's missing."""
-    from p2pgpu.worker import gpu_compat, share as sharing
+    from p2pgpu.worker import gpu_compat
+    from p2pgpu.worker import share as sharing
 
     table = Table(title="Host readiness", show_header=False)
     ts_ip = sharing.tailscale_ip()
@@ -510,15 +613,6 @@ def connect(
 
 
 @app.command()
-def agent(
-    host: str = typer.Option("0.0.0.0", help="Bind address."),
-    port: int = typer.Option(8777, help="Port to listen on."),
-) -> None:
-    """Run the always-on agent so peers can discover this machine."""
-    serve(host=host, port=port)
-
-
-@app.command()
 def inspect(url: str = typer.Argument(..., help="Worker base URL, e.g. http://100.x.y.z:8777")) -> None:
     """Fetch a remote machine's capabilities (needs 'p2pgpu serve' running there)."""
     token = cluster_token()
@@ -570,11 +664,15 @@ def bench(
 
 
 @app.command()
-def serve(
+def agent(
     host: str = typer.Option("0.0.0.0", help="Bind address."),
     port: int = typer.Option(8777, help="Port to listen on."),
 ) -> None:
-    """Run the capability/benchmark agent (optional, for probe and bench)."""
+    """Run the always-on agent, so peers can discover this machine.
+
+    Needed for 'p2pgpu discover' and 'connect' to see this machine, and for
+    'inspect' and 'bench' to reach it.
+    """
     if cluster_token() is None:
         console.print("[red]No token. Run 'p2pgpu init' first.[/]")
         raise typer.Exit(1)
