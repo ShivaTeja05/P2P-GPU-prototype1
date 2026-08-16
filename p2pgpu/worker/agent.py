@@ -65,6 +65,27 @@ def capabilities() -> NodeCapabilities:
     return probe()
 
 
+@app.get("/v1/share", dependencies=[Depends(require_token)])
+def current_share() -> dict:
+    """What this machine is offering right now.
+
+    This is what removes the copy-paste handoff: the borrower asks each peer
+    directly instead of waiting for someone to send them a link.
+    """
+    from p2pgpu.worker import share as sharing
+
+    session = sharing.load_session()
+    if session is None or not sharing.container_running():
+        return {"sharing": False}
+    return {
+        "sharing": True,
+        "url": session.url,
+        "ssh_command": session.ssh_command,
+        "hours_left": round(session.remaining_s / 3600, 2),
+        "image": session.image,
+    }
+
+
 @app.post("/v1/bench/sink", dependencies=[Depends(require_token)])
 async def bench_sink(request: Request) -> dict[str, int]:
     """Swallow an upload and report how much arrived -> measures client upstream."""

@@ -403,6 +403,79 @@ def attach(
 
 
 @app.command()
+def discover() -> None:
+    """Find every p2pgpu machine on your tailnet. No URLs, no copy-paste."""
+    from p2pgpu.common.discovery import discover as run_discover
+
+    token = cluster_token()
+    console.print("[dim]scanning tailnet...[/]")
+    found = run_discover(token)
+    if not found:
+        console.print("[yellow]No p2pgpu machines found.[/]")
+        console.print("Is the other machine running [cyan]p2pgpu agent[/]? Check [cyan]tailscale status[/].")
+        raise typer.Exit(1)
+
+    table = Table(title="Machines on your tailnet")
+    for col in ("host", "os", "GPU", "free", "status"):
+        table.add_column(col)
+    for item in found:
+        if item.sharing:
+            status = f"[green]sharing[/] ({item.hours_left}h left)"
+        else:
+            status = "[dim]idle[/]"
+        table.add_row(
+            item.peer.hostname,
+            item.peer.os,
+            item.gpu_name or "[dim]none[/]",
+            f"{item.gpu_free_mb / 1024:.1f} GB" if item.gpu_free_mb else "-",
+            status,
+        )
+    console.print(table)
+    if any(f.sharing for f in found):
+        console.print("\nConnect with [cyan]p2pgpu connect[/]")
+
+
+@app.command()
+def connect(
+    host: str = typer.Option("", help="Hostname to connect to (default: the only active share)."),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open in a browser."),
+) -> None:
+    """Connect to a shared GPU on your tailnet, without needing a URL."""
+    from p2pgpu.common.discovery import discover as run_discover
+
+    token = cluster_token()
+    console.print("[dim]looking for shared GPUs...[/]")
+    active = [f for f in run_discover(token) if f.sharing and f.share_url]
+
+    if host:
+        active = [f for f in active if f.peer.hostname.lower() == host.lower()]
+    if not active:
+        console.print("[yellow]No active shares found on your tailnet.[/]")
+        console.print("Ask them to run [cyan]p2pgpu share[/] (or Share-My-GPU.bat).")
+        raise typer.Exit(1)
+    if len(active) > 1:
+        console.print("Several machines are sharing. Pick one with [cyan]--host[/]:")
+        for item in active:
+            console.print(f"  · {item.label}")
+        raise typer.Exit(1)
+
+    target = active[0]
+    console.print(f"[green]Found:[/] {target.label}")
+    if target.ssh_command:
+        console.print(f"[dim]ssh available: {target.ssh_command}[/]")
+    attach(target.share_url, open_browser=open_browser)
+
+
+@app.command()
+def agent(
+    host: str = typer.Option("0.0.0.0", help="Bind address."),
+    port: int = typer.Option(8777, help="Port to listen on."),
+) -> None:
+    """Run the always-on agent so peers can discover this machine."""
+    serve(host=host, port=port)
+
+
+@app.command()
 def inspect(url: str = typer.Argument(..., help="Worker base URL, e.g. http://100.x.y.z:8777")) -> None:
     """Fetch a remote machine's capabilities (needs 'p2pgpu serve' running there)."""
     token = cluster_token()
