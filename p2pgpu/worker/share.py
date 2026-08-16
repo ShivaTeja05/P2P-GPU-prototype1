@@ -1,0 +1,262 @@
+"""Share this machine's GPU with one trusted person, for a fixed time.
+
+The model is the same one vast.ai uses for its hosts: the GPU is handed to a
+Docker container via the NVIDIA Container Toolkit, and the guest gets the
+container -- not the machine. Two things differ here:
+
+  * There is no marketplace and no billing. One friend, one GPU.
+  * Reachability comes from the Tailscale overlay instead of forwarded ports,
+    so nothing is exposed to the public internet.
+
+The share always expires. A forgotten container that quietly holds someone's
+GPU hostage is the failure mode most likely to end the friendship, so the
+timeout is not optional.
+"""
+
+from __future__ import annotations
+
+import json
+import secrets
+import shutil
+import subprocess
+import time
+from dataclasses import dataclass, asdict
+from pathlib import Path
+
+from p2pgpu.common.config import CONFIG_DIR
+
+CONTAINER_NAME = "p2pgpu-share"
+DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
+DEFAULT_PORT = 8888
+SESSION_FILE = CONFIG_DIR / "share_session.json"
+
+# Mounted at /workspace in the container. Deliberately a dedicated directory:
+# the guest needs somewhere to leave checkpoints, and it must not be $HOME.
+WORKSPACE = Path.home() / "p2pgpu-workspace"
+
+
+class ShareError(RuntimeError):
+    """Something in the host setup is not ready. Message is user-facing."""
+
+
+@dataclass
+class ShareSession:
+    url: str
+    token: str
+    bind_ip: str
+    port: int
+    hours: float
+    started_at: float
+    image: str
+    workspace: str
+
+    @property
+    def expires_at(self) -> float:
+        return self.started_at + self.hours * 3600
+
+    @property
+    def remaining_s(self) -> float:
+        return max(0.0, self.expires_at - time.time())
+
+
+def _run(cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+# --------------------------------------------------------------------------
+# Host preflight
+# --------------------------------------------------------------------------
+
+
+def tailscale_ip() -> str | None:
+    """This machine's stable overlay address, or None if Tailscale is absent."""
+    if not shutil.which("tailscale"):
+        return None
+    try:
+        result = _run(["tailscale", "ip", "-4"], timeout=15)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    first = result.stdout.strip().splitlines()
+    return first[0].strip() if first else None
+
+
+def docker_available() -> bool:
+    if not shutil.which("docker"):
+        return False
+    try:
+        return _run(["docker", "info"], timeout=30).returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def nvidia_runtime_registered() -> bool:
+    """Cheap check that the NVIDIA Container Toolkit is wired into Docker.
+
+    Cheap because it reads Docker's config rather than pulling a CUDA image.
+    A false here is the single most common setup failure.
+    """
+    try:
+        result = _run(["docker", "info", "--format", "{{json .Runtimes}}"], timeout=30)
+    except (subprocess.SubprocessError, OSError):
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        return "nvidia" in json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return "nvidia" in result.stdout
+
+
+def verify_gpu_passthrough(image: str = "nvidia/cuda:12.4.0-base-ubuntu22.04") -> tuple[bool, str]:
+    """Actually run nvidia-smi inside a container. Slow (pulls ~200 MB) but definitive."""
+    try:
+        result = _run(["docker", "run", "--rm", "--gpus", "all", image, "nvidia-smi"], timeout=600)
+    except subprocess.TimeoutExpired:
+        return False, "timed out pulling or running the CUDA test image"
+    except OSError as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, result.stdout.strip()
+    return False, (result.stderr or result.stdout).strip()
+
+
+def preflight(require_tailscale: bool = True) -> list[str]:
+    """Return a list of blocking problems. Empty list means good to go."""
+    problems: list[str] = []
+    if not docker_available():
+        problems.append(
+            "Docker is not installed or not running. Install Docker Engine "
+            "(Linux) or Docker Desktop with the WSL2 backend (Windows)."
+        )
+    elif not nvidia_runtime_registered():
+        problems.append(
+            "Docker cannot see the NVIDIA runtime. Install the NVIDIA Container "
+            "Toolkit: https://docs.nvidia.com/datacenter/cloud-native/"
+            "container-toolkit/latest/install-guide.html"
+        )
+    if require_tailscale and tailscale_ip() is None:
+        problems.append(
+            "No Tailscale address. Install from https://tailscale.com/download "
+            "and run 'tailscale up', or pass --bind-ip to use a LAN address."
+        )
+    return problems
+
+
+# --------------------------------------------------------------------------
+# Container lifecycle
+# --------------------------------------------------------------------------
+
+
+def container_running() -> bool:
+    try:
+        result = _run(
+            ["docker", "ps", "--filter", f"name=^{CONTAINER_NAME}$", "--format", "{{.Names}}"],
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return CONTAINER_NAME in result.stdout
+
+
+def load_session() -> ShareSession | None:
+    if not SESSION_FILE.exists():
+        return None
+    try:
+        return ShareSession(**json.loads(SESSION_FILE.read_text()))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _save_session(session: ShareSession) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    SESSION_FILE.write_text(json.dumps(asdict(session), indent=2))
+    SESSION_FILE.chmod(0o600)
+
+
+def start_share(
+    hours: float = 4.0,
+    image: str = DEFAULT_IMAGE,
+    port: int = DEFAULT_PORT,
+    bind_ip: str | None = None,
+    shm_size: str = "8g",
+    gpus: str = "all",
+) -> ShareSession:
+    """Launch the shared GPU container and return the session details."""
+    if container_running():
+        raise ShareError(
+            f"A share is already running. Stop it first with 'p2pgpu stop'."
+        )
+
+    ip = bind_ip or tailscale_ip()
+    if ip is None:
+        raise ShareError("No bind address available. Start Tailscale or pass --bind-ip.")
+
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(24)
+    seconds = int(hours * 3600)
+
+    # jupyterlab is installed at start rather than baked in, so the default
+    # image stays a stock PyTorch one that most people already have cached.
+    # 'timeout' makes the container self-terminate; combined with --rm that
+    # means an expired share leaves nothing behind and needs no daemon.
+    inner = (
+        "pip install --quiet --no-input jupyterlab >/dev/null 2>&1; "
+        f"exec timeout {seconds}s jupyter lab "
+        f"--ip=0.0.0.0 --port={port} --no-browser --allow-root "
+        "--ServerApp.root_dir=/workspace"
+    )
+
+    cmd = [
+        "docker", "run", "-d", "--rm",
+        "--name", CONTAINER_NAME,
+        "--gpus", gpus,
+        "--shm-size", shm_size,          # PyTorch dataloaders die on the 64 MB default
+        "-e", f"JUPYTER_TOKEN={token}",
+        # Binding to the overlay IP, not 0.0.0.0, keeps this off the host's LAN
+        # and off the public internet even if a router is misconfigured.
+        "-p", f"{ip}:{port}:{port}",
+        "-v", f"{WORKSPACE}:/workspace",
+        "-w", "/workspace",
+        image,
+        "bash", "-lc", inner,
+    ]
+
+    try:
+        result = _run(cmd, timeout=900)
+    except subprocess.TimeoutExpired as exc:
+        raise ShareError("Timed out starting the container (image pull too slow?)") from exc
+
+    if result.returncode != 0:
+        raise ShareError(f"docker run failed:\n{(result.stderr or result.stdout).strip()}")
+
+    session = ShareSession(
+        url=f"http://{ip}:{port}/lab?token={token}",
+        token=token,
+        bind_ip=ip,
+        port=port,
+        hours=hours,
+        started_at=time.time(),
+        image=image,
+        workspace=str(WORKSPACE),
+    )
+    _save_session(session)
+    return session
+
+
+def stop_share() -> bool:
+    """Stop the share. Returns True if a container was actually stopped."""
+    was_running = container_running()
+    if was_running:
+        _run(["docker", "stop", CONTAINER_NAME], timeout=60)
+    SESSION_FILE.unlink(missing_ok=True)
+    return was_running
+
+
+def share_logs(lines: int = 50) -> str:
+    try:
+        result = _run(["docker", "logs", "--tail", str(lines), CONTAINER_NAME], timeout=30)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return f"could not read logs: {exc}"
+    return (result.stdout + result.stderr).strip()

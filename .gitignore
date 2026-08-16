@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.env
+*.log
+# Never commit the shared secret or session details
+cluster.toml
+nodes.json
+bench-results/
+models/
+# Local design notes, not part of this project's scope
+notes/
+# Guest workspace, if anyone runs the host from inside the repo
+p2pgpu-workspace/
+*.safetensors
+*.gguf
