@@ -21,3 +21,4 @@ notes/
 p2pgpu-workspace/
 *.safetensors
 *.gguf
+check-setup-output.txt

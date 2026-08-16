@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -37,8 +38,42 @@ SESSION_FILE = CONFIG_DIR / "share_session.json"
 WORKSPACE = Path.home() / "p2pgpu-workspace"
 
 
+DEFAULT_SSH_PORT = 2222
+
+# A public key is one line: type, base64 blob, optional comment. Validated
+# before it goes anywhere near a shell command -- this string is interpolated
+# into the container's startup script, so a quote or newline in it would be a
+# command injection on the owner's machine.
+SSH_KEY_RE = re.compile(
+    r"^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+)"
+    r"\s+[A-Za-z0-9+/]+={0,3}(\s+\S.*)?$"
+)
+
+
 class ShareError(RuntimeError):
     """Something in the host setup is not ready. Message is user-facing."""
+
+
+def validate_ssh_key(key: str) -> str:
+    """Return a cleaned single-line public key, or raise ShareError."""
+    cleaned = " ".join(key.strip().split())
+    if not cleaned:
+        raise ShareError("SSH key is empty.")
+    if "\n" in key.strip() or "\r" in key:
+        raise ShareError("SSH key must be a single line.")
+    if "'" in cleaned or '"' in cleaned or "\\" in cleaned:
+        raise ShareError("SSH key contains quoting characters; that is not a valid key.")
+    if cleaned.startswith("-----BEGIN"):
+        raise ShareError(
+            "That looks like a PRIVATE key. Send the .pub file instead -- never "
+            "share a private key with anyone."
+        )
+    if not SSH_KEY_RE.match(cleaned):
+        raise ShareError(
+            "Not a valid SSH public key. Expected something starting with "
+            "'ssh-ed25519' or 'ssh-rsa'. Ask them to run 'p2pgpu mykey'."
+        )
+    return cleaned
 
 
 @dataclass
@@ -51,6 +86,8 @@ class ShareSession:
     started_at: float
     image: str
     workspace: str
+    ssh_port: int | None = None
+    ssh_command: str | None = None
 
     @property
     def expires_at(self) -> float:
@@ -274,6 +311,8 @@ def start_share(
     bind_ip: str | None = None,
     shm_size: str = "8g",
     gpus: str = "all",
+    ssh_key: str | None = None,
+    ssh_port: int = DEFAULT_SSH_PORT,
 ) -> ShareSession:
     """Launch the shared GPU container and return the session details."""
     if container_running():
@@ -300,9 +339,33 @@ def start_share(
     # image stays a stock PyTorch one that most people already have cached.
     # 'timeout' makes the container self-terminate; combined with --rm that
     # means an expired share leaves nothing behind and needs no daemon.
+    setup = (
+        "exec 3>&1; { echo '[p2pgpu] installing jupyterlab...'; "
+        "pip install --quiet --no-input jupyterlab; "
+    )
+
+    if ssh_key:
+        key = validate_ssh_key(ssh_key)
+        # Key-only auth. Root here is root *inside an unprivileged container*,
+        # which is not root on the host -- but passwords are still disabled so a
+        # leaked URL cannot become a shell.
+        setup += (
+            "echo '[p2pgpu] installing openssh-server (this takes a few minutes)...'; "
+            "apt-get update -qq && apt-get install -y -qq openssh-server; "
+            "mkdir -p /run/sshd /root/.ssh; "
+            f"printf '%s\\n' '{key}' > /root/.ssh/authorized_keys; "
+            "chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys; "
+            "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' "
+            "/etc/ssh/sshd_config; "
+            "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "
+            "/etc/ssh/sshd_config; "
+            "/usr/sbin/sshd && echo '[p2pgpu] sshd ready'; "
+        )
+
     inner = (
-        "pip install --quiet --no-input jupyterlab >/dev/null 2>&1; "
-        f"exec timeout {seconds}s jupyter lab "
+        setup
+        + "echo '[p2pgpu] starting notebook'; } 2>&1 | tee /tmp/p2pgpu-setup.log >&3; "
+        + f"exec timeout {seconds}s jupyter lab "
         f"--ip=0.0.0.0 --port={port} --no-browser --allow-root "
         "--ServerApp.root_dir=/workspace"
     )
@@ -316,6 +379,7 @@ def start_share(
         # Binding to the overlay IP, not 0.0.0.0, keeps this off the host's LAN
         # and off the public internet even if a router is misconfigured.
         "-p", f"{bracket_host(ip)}:{port}:{port}",
+        *(["-p", f"{bracket_host(ip)}:{ssh_port}:22"] if ssh_key else []),
         "-v", f"{docker_mount_path(WORKSPACE)}:/workspace",
         "-w", "/workspace",
         image,
@@ -339,9 +403,54 @@ def start_share(
         started_at=time.time(),
         image=image,
         workspace=str(WORKSPACE),
+        ssh_port=ssh_port if ssh_key else None,
+        ssh_command=(f"ssh -p {ssh_port} root@{ip}" if ssh_key else None),
     )
     _save_session(session)
     return session
+
+
+def wait_until_ready(
+    host: str,
+    port: int,
+    timeout_s: int = 900,
+    poll_s: float = 3.0,
+) -> bool:
+    """Block until the notebook actually answers, or give up.
+
+    The container installs jupyterlab (and optionally openssh-server) on start,
+    which takes minutes on a first run. Handing the owner a URL before any of
+    that finishes means their friend gets 'connection refused' and everyone
+    assumes it is broken. So we wait and say so.
+    """
+    import socket
+
+    deadline = time.monotonic() + timeout_s
+    target = host.strip("[]")
+    while time.monotonic() < deadline:
+        if not container_running():
+            return False
+        try:
+            with socket.create_connection((target, port), timeout=3) as sock:
+                # Docker's proxy accepts the TCP connection whether or not
+                # anything is listening inside, so a connect() alone proves
+                # nothing. Send a request and require actual bytes back.
+                sock.sendall(b"GET / HTTP/1.0\r\n\r\n")
+                if sock.recv(16):
+                    return True
+        except OSError:
+            pass
+        time.sleep(poll_s)
+    return False
+
+
+def setup_log() -> str:
+    """The container's own setup transcript, for when something fails."""
+    try:
+        result = _run(["docker", "exec", CONTAINER_NAME, "cat", "/tmp/p2pgpu-setup.log"], timeout=30)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return f"could not read setup log: {exc}"
+    return (result.stdout or result.stderr).strip()
 
 
 def stop_share() -> bool:

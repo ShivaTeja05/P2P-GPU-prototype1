@@ -195,11 +195,19 @@ Write-Step 'Installing p2pgpu'
 Push-Location $RepoRoot
 try {
     if (Test-Command 'uv') {
-        uv venv --python 3.12
+        # Re-running Setup.bat is normal (reboot after Docker, retry after a
+        # fix). 'uv venv' prompts interactively when .venv already exists, which
+        # stalls the script behind a question most people won't expect, so
+        # reuse the existing environment instead of recreating it.
+        if (Test-Path (Join-Path $RepoRoot '.venv')) {
+            Write-Ok 'virtual environment already exists, reusing it'
+        } else {
+            uv venv --python 3.12
+        }
         uv pip install -e .
     } else {
         Write-Miss 'uv unavailable; falling back to venv + pip'
-        python -m venv .venv
+        if (-not (Test-Path (Join-Path $RepoRoot '.venv'))) { python -m venv .venv }
         & '.venv\Scripts\python.exe' -m pip install --quiet --upgrade pip
         & '.venv\Scripts\python.exe' -m pip install -e .
     }

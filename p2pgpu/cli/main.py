@@ -8,6 +8,7 @@ Two roles:
 from __future__ import annotations
 
 import webbrowser
+from pathlib import Path
 
 import httpx
 import typer
@@ -92,6 +93,10 @@ def share(
     port: int = typer.Option(8888, help="Port for the notebook server."),
     bind_ip: str = typer.Option("", help="Override the bind address (default: Tailscale IP)."),
     gpu: str = typer.Option("all", help="Which GPUs to share: 'all', '0', '0,1', or 'none'."),
+    ssh_key: str = typer.Option("", help="Their SSH public key -- also enables SSH into the container."),
+    ssh_key_file: str = typer.Option("", help="Read the public key from a file instead."),
+    ssh_port: int = typer.Option(2222, help="Host port to expose container SSH on."),
+    wait: bool = typer.Option(True, "--wait/--no-wait", help="Wait until the notebook is actually up."),
     skip_checks: bool = typer.Option(False, help="Skip host preflight checks."),
 ) -> None:
     """Share this machine's GPU with your friend for a fixed time.
@@ -119,6 +124,20 @@ def share(
                 console.print(f"  [red]x[/] {problem}")
             raise typer.Exit(1)
 
+    key = ssh_key.strip()
+    if ssh_key_file:
+        try:
+            key = Path(ssh_key_file).expanduser().read_text().strip()
+        except OSError as exc:
+            console.print(f"[red]Could not read {ssh_key_file}: {exc}[/]")
+            raise typer.Exit(1) from exc
+    if key:
+        try:
+            sharing.validate_ssh_key(key)
+        except sharing.ShareError as exc:
+            console.print(f"[red]{exc}[/]")
+            raise typer.Exit(1) from exc
+
     chosen_image, reason = sharing.resolve_image(image or None, gpu)
     for note in gpu_compat.compatibility_notes(gpu_compat.detect_gpus()):
         console.print(f"[yellow]note:[/] {note}")
@@ -131,10 +150,26 @@ def share(
             port=port,
             bind_ip=bind_ip or None,
             gpus=gpu,
+            ssh_key=key or None,
+            ssh_port=ssh_port,
         )
     except sharing.ShareError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
+
+    if wait:
+        console.print(
+            "[dim]Container started. Installing packages inside it -- this takes a few\n"
+            "minutes on a first run. Waiting until it actually answers...[/]"
+        )
+        with console.status("[cyan]waiting for the notebook to come up..."):
+            ready = sharing.wait_until_ready(session.bind_ip, session.port)
+        if not ready:
+            console.print("[red]The notebook never came up. Setup log:[/]")
+            console.print(sharing.setup_log() or "[dim](empty)[/]")
+            console.print("\nThe container may still be running: [cyan]p2pgpu stop[/] to clean up.")
+            raise typer.Exit(1)
+        console.print("[green]Ready.[/]\n")
 
     console.print(
         Panel(
@@ -143,6 +178,10 @@ def share(
             border_style="green",
         )
     )
+    if session.ssh_command:
+        console.print(
+            Panel(session.ssh_command, title="they can also SSH in", border_style="cyan")
+        )
     console.print(f"workspace (shared with the container): [cyan]{session.workspace}[/]")
     console.print("stop early with [cyan]p2pgpu stop[/]  ·  check with [cyan]p2pgpu status[/]")
 
@@ -167,12 +206,56 @@ def status() -> None:
         table.add_row("url", session.url)
         table.add_row("bound to", f"{session.bind_ip}:{session.port}")
         table.add_row("time left", f"{remaining / 3600:.1f} h")
+        if session.ssh_command:
+            table.add_row("ssh", session.ssh_command)
         table.add_row("workspace", session.workspace)
         table.add_row("image", session.image)
     else:
         table.add_row("container", sharing.CONTAINER_NAME)
         table.add_row("note", "running, but no saved session details")
     console.print(table)
+
+
+@app.command()
+def mykey(
+    generate: bool = typer.Option(True, "--generate/--no-generate", help="Create a key if none exists."),
+) -> None:
+    """Print your SSH public key, to send to whoever is lending you their GPU.
+
+    Safe to share: this is the *public* half. Your private key never leaves this
+    machine.
+    """
+    import subprocess
+
+    ssh_dir = Path.home() / ".ssh"
+    for name in ("id_ed25519.pub", "id_ecdsa.pub", "id_rsa.pub"):
+        candidate = ssh_dir / name
+        if candidate.exists():
+            console.print(f"[dim]{candidate}[/]\n")
+            print(candidate.read_text().strip())
+            console.print("\n[dim]Send that whole line to your friend.[/]")
+            return
+
+    if not generate:
+        console.print("[yellow]No SSH key found and --no-generate was passed.[/]")
+        raise typer.Exit(1)
+
+    console.print("No SSH key found. Creating an ed25519 key...")
+    ssh_dir.mkdir(mode=0o700, exist_ok=True)
+    target = ssh_dir / "id_ed25519"
+    try:
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-f", str(target), "-N", "", "-q"],
+            check=True,
+            timeout=60,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        console.print(f"[red]Could not run ssh-keygen: {exc}[/]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[green]Created {target}[/]\n")
+    print(target.with_suffix(".pub").read_text().strip())
+    console.print("\n[dim]Send that whole line to your friend.[/]")
 
 
 @app.command()
@@ -205,6 +288,12 @@ def logs(lines: int = typer.Option(50, help="How many lines to show.")) -> None:
     """Show the shared container's output (useful when it won't start)."""
     from p2pgpu.worker import share as sharing
 
+    setup = sharing.setup_log()
+    if setup:
+        console.print("[bold]container setup:[/]")
+        console.print(setup)
+        console.print()
+    console.print("[bold]notebook output:[/]")
     console.print(sharing.share_logs(lines) or "[dim]no output[/]")
 
 
