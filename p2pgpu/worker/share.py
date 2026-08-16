@@ -16,6 +16,7 @@ timeout is not optional.
 from __future__ import annotations
 
 import json
+import platform
 import secrets
 import shutil
 import subprocess
@@ -69,18 +70,50 @@ def _run(cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
 # --------------------------------------------------------------------------
 
 
+# The Windows installer does not put tailscale.exe on PATH, and the macOS app
+# bundles its CLI inside the .app, so 'which' alone finds it on Linux only.
+TAILSCALE_FALLBACKS = [
+    r"C:\Program Files\Tailscale\tailscale.exe",
+    r"C:\Program Files (x86)\Tailscale\tailscale.exe",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    "/usr/bin/tailscale",
+    "/usr/local/bin/tailscale",
+]
+
+
+def tailscale_exe() -> str | None:
+    found = shutil.which("tailscale")
+    if found:
+        return found
+    for candidate in TAILSCALE_FALLBACKS:
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
 def tailscale_ip() -> str | None:
     """This machine's stable overlay address, or None if Tailscale is absent."""
-    if not shutil.which("tailscale"):
+    exe = tailscale_exe()
+    if exe is None:
         return None
     try:
-        result = _run(["tailscale", "ip", "-4"], timeout=15)
+        result = _run([exe, "ip", "-4"], timeout=15)
     except (subprocess.SubprocessError, OSError):
         return None
     if result.returncode != 0:
         return None
     first = result.stdout.strip().splitlines()
     return first[0].strip() if first else None
+
+
+def docker_mount_path(path: Path) -> str:
+    """Render a host path for 'docker -v'.
+
+    Docker Desktop accepts Windows paths, but a backslash form next to the
+    colon separator is easy to get wrong. Forward slashes work on every
+    platform, so normalise rather than special-casing at the call site.
+    """
+    return str(path).replace("\\", "/")
 
 
 def docker_available() -> bool:
@@ -123,26 +156,43 @@ def verify_gpu_passthrough(image: str = "nvidia/cuda:12.4.0-base-ubuntu22.04") -
     return False, (result.stderr or result.stdout).strip()
 
 
-def preflight(require_tailscale: bool = True) -> list[str]:
-    """Return a list of blocking problems. Empty list means good to go."""
+def preflight(require_tailscale: bool = True) -> tuple[list[str], list[str]]:
+    """Check the host. Returns (blocking problems, non-blocking warnings)."""
     problems: list[str] = []
+    warnings: list[str] = []
+    on_windows = platform.system() == "Windows"
+
     if not docker_available():
         problems.append(
             "Docker is not installed or not running. Install Docker Engine "
-            "(Linux) or Docker Desktop with the WSL2 backend (Windows)."
+            "(Linux) or Docker Desktop with the WSL2 backend (Windows), and "
+            "make sure it is actually started."
         )
     elif not nvidia_runtime_registered():
-        problems.append(
-            "Docker cannot see the NVIDIA runtime. Install the NVIDIA Container "
-            "Toolkit: https://docs.nvidia.com/datacenter/cloud-native/"
-            "container-toolkit/latest/install-guide.html"
+        message = (
+            "Docker does not list an NVIDIA runtime. On Linux, install the "
+            "NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/"
+            "cloud-native/container-toolkit/latest/install-guide.html"
         )
+        if on_windows:
+            # Docker Desktop reaches the GPU through WSL2 paravirtualisation and
+            # does not always advertise an 'nvidia' runtime even when --gpus
+            # works. Blocking here would reject a perfectly good setup, so this
+            # is a warning and the real passthrough test in 'doctor' decides.
+            warnings.append(
+                "Docker does not list an NVIDIA runtime. On Windows this is "
+                "often fine -- Docker Desktop reaches the GPU through WSL2. "
+                "Run 'p2pgpu doctor' to test it for real."
+            )
+        else:
+            problems.append(message)
+
     if require_tailscale and tailscale_ip() is None:
         problems.append(
-            "No Tailscale address. Install from https://tailscale.com/download "
-            "and run 'tailscale up', or pass --bind-ip to use a LAN address."
+            "No Tailscale address. Install from https://tailscale.com/download, "
+            "run 'tailscale up', or pass --bind-ip to use a LAN address."
         )
-    return problems
+    return problems, warnings
 
 
 # --------------------------------------------------------------------------
@@ -242,7 +292,7 @@ def start_share(
         # Binding to the overlay IP, not 0.0.0.0, keeps this off the host's LAN
         # and off the public internet even if a router is misconfigured.
         "-p", f"{ip}:{port}:{port}",
-        "-v", f"{WORKSPACE}:/workspace",
+        "-v", f"{docker_mount_path(WORKSPACE)}:/workspace",
         "-w", "/workspace",
         image,
         "bash", "-lc", inner,

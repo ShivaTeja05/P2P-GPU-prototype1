@@ -19,7 +19,25 @@ your Mac  ──── Tailscale (encrypted, through both routers) ──── 
                                                             └── their files ✗
 ```
 
-## Install
+## Windows: no terminal needed
+
+Download the repo, then double-click:
+
+| | |
+|---|---|
+| **Sharing your GPU** | `Setup.bat` → `Check-Setup.bat` → `Share-My-GPU.bat` |
+| **Using a friend's GPU** | `Setup-Guest-Only.bat` → `Connect-To-GPU.bat` |
+
+`Setup.bat` checks for Python, uv, Tailscale, Docker Desktop and your NVIDIA
+driver, and offers to install what's missing — nothing installs without you
+saying yes. `Share-My-GPU.bat` copies the connection URL straight to your
+clipboard; `Connect-To-GPU.bat` reads it back off the clipboard on the other
+side.
+
+Also `Sharing-Status.bat` and `Stop-Sharing.bat`. Full walkthrough with
+troubleshooting: **[docs/WINDOWS.md](docs/WINDOWS.md)**.
+
+## Install (macOS / Linux)
 
 Both machines:
 

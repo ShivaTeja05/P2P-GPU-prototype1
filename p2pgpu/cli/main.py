@@ -107,7 +107,9 @@ def share(
     from p2pgpu.worker import gpu_compat, share as sharing
 
     if not skip_checks:
-        problems = sharing.preflight(require_tailscale=not bind_ip)
+        problems, warnings = sharing.preflight(require_tailscale=not bind_ip)
+        for warning in warnings:
+            console.print(f"[yellow]warning:[/] {warning}")
         if problems:
             console.print("[red]Host is not ready:[/]")
             for problem in problems:
@@ -171,6 +173,20 @@ def status() -> None:
 
 
 @app.command()
+def url() -> None:
+    """Print just the share URL, with no formatting.
+
+    For scripts and for piping to the clipboard.
+    """
+    from p2pgpu.worker import share as sharing
+
+    session = sharing.load_session()
+    if session is None or not sharing.container_running():
+        raise typer.Exit(1)
+    print(session.url)
+
+
+@app.command()
 def stop() -> None:
     """Stop sharing the GPU right now."""
     from p2pgpu.worker import share as sharing
@@ -230,7 +246,9 @@ def doctor(
         for note in gpu_compat.compatibility_notes(profiles):
             console.print(f"[yellow]note:[/] {note}")
 
-    problems = sharing.preflight()
+    problems, warnings = sharing.preflight()
+    for warning in warnings:
+        console.print(f"[yellow]warning:[/] {warning}")
     if problems:
         console.print("\n[yellow]To fix:[/]")
         for problem in problems:

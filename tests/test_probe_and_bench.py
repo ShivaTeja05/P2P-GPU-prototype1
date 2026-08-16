@@ -90,6 +90,25 @@ def test_share_preflight_reports_problems_as_strings():
     """Preflight must return actionable text, never raise, on a machine with no GPU."""
     from p2pgpu.worker import share as sharing
 
-    problems = sharing.preflight()
-    assert isinstance(problems, list)
-    assert all(isinstance(p, str) and p for p in problems)
+    problems, warnings = sharing.preflight()
+    assert isinstance(problems, list) and isinstance(warnings, list)
+    assert all(isinstance(m, str) and m for m in problems + warnings)
+
+
+def test_docker_mount_path_uses_forward_slashes():
+    """Windows paths must not carry backslashes into a colon-separated -v arg."""
+    from pathlib import PureWindowsPath
+
+    from p2pgpu.worker.share import docker_mount_path
+
+    rendered = docker_mount_path(PureWindowsPath(r"C:\Users\Bob\p2pgpu-workspace"))
+    assert rendered == "C:/Users/Bob/p2pgpu-workspace"
+    assert "\\" not in rendered
+
+
+def test_tailscale_lookup_never_raises_when_absent():
+    """A missing Tailscale must degrade to None, not blow up the CLI."""
+    from p2pgpu.worker.share import tailscale_exe, tailscale_ip
+
+    assert tailscale_exe() is None or isinstance(tailscale_exe(), str)
+    assert tailscale_ip() is None or isinstance(tailscale_ip(), str)

@@ -36,6 +36,46 @@ Entry format:
 
 ---
 
+## 2026-08-16 — Windows double-click setup
+
+**Status:** Windows users need no terminal. Still awaiting a real hardware run.
+
+**Changed:**
+- `scripts/setup.ps1` — detects Python 3.10-3.12, uv, Tailscale, Docker Desktop
+  and the NVIDIA driver; offers winget installs with confirmation; then installs
+  p2pgpu into `.venv`. Has `-GuestOnly` (skip Docker) and `-Yes`.
+- `scripts/share.ps1`, `scripts/connect.ps1` — guided share/connect, with
+  clipboard integration in both directions.
+- Seven root `.bat` launchers so nothing needs a terminal.
+- `p2pgpu url` — prints the bare share URL for scripting.
+- `docs/WINDOWS.md` — full walkthrough and troubleshooting.
+
+**Why (Windows-specific fixes that were real bugs):**
+- *Tailscale is not on PATH on Windows.* `shutil.which("tailscale")` returned
+  None on a perfectly working install. Now falls back to the Program Files
+  locations, and the macOS in-bundle path too.
+- *Backslashes in the `-v` argument.* `docker -v C:\Users\..:/workspace` mixes
+  backslashes with a colon separator. `docker_mount_path()` normalises to
+  forward slashes, which Docker accepts everywhere.
+- *The NVIDIA-runtime check produced a false negative on Windows.* Docker
+  Desktop reaches the GPU through WSL2 paravirtualisation and does not always
+  advertise an `nvidia` runtime, so blocking on it would have rejected a working
+  setup. `preflight()` now returns (problems, warnings) and this is a warning on
+  Windows; the real passthrough test in `doctor` decides.
+- *`.bat` wrappers rather than `.ps1`* because Windows blocks double-clicked
+  PowerShell by default. Each wrapper sets ExecutionPolicy for that single run,
+  so nothing about the machine's configuration changes.
+- *`.gitattributes` pins CRLF for `.bat`/`.ps1`* so the scripts still work after
+  a clone on Windows.
+
+**Measured:** 43 tests pass, including Windows path rendering via
+`PureWindowsPath` (verifiable from macOS). PowerShell scripts checked for
+balanced blocks and correct `.bat`→`.ps1` wiring; **not executed on Windows.**
+
+**Next:** friend runs `Setup.bat` → `Check-Setup.bat` on the real machine.
+
+---
+
 ## 2026-08-16 — Works with any NVIDIA GPU, not one hardcoded image
 
 **Status:** Unchanged otherwise — still needs a real run on NVIDIA hardware.
