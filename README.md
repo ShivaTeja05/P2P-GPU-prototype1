@@ -73,6 +73,41 @@ it's their GPU. Train something.
 p2pgpu stop
 ```
 
+## Any NVIDIA GPU, not just one
+
+The container image is chosen automatically from the card's compute capability
+and the installed driver. `p2pgpu doctor` shows what it detected and what it
+picked.
+
+| Card | Arch | cc | Image chosen |
+|---|---|---|---|
+| GTX 10-series | Pascal | 6.1 | PyTorch 2.1 / CUDA 11.8 |
+| GTX 16xx, RTX 20-series | Turing | 7.5 | PyTorch 2.5 / CUDA 12.4 |
+| RTX 30-series | Ampere | 8.6 | PyTorch 2.5 / CUDA 12.4 |
+| RTX 40-series | Ada | 8.9 | PyTorch 2.5 / CUDA 12.4 |
+| RTX 50-series | Blackwell | 12.0 | PyTorch 2.7 / CUDA 12.8 |
+
+Two mismatches this exists to prevent, both of which otherwise fail at runtime
+with errors that look like a bug in this tool:
+
+- **Old driver, new image.** CUDA 12.x needs driver ≥ 525.60.13. Below that, a
+  CUDA 12 container starts fine and then dies. Detected → falls back to CUDA 11.8.
+- **New card, old image.** RTX 50-series is sm_120, and PyTorch only shipped
+  sm_120 kernels in 2.7 with CUDA 12.8. Anything older sees the GPU and then
+  fails with *"no kernel image is available for execution on the device."*
+
+Pick a specific card, or override the image entirely:
+
+```bash
+p2pgpu share --gpu 0                 # just GPU 0
+p2pgpu share --gpu 0,1               # two of them
+p2pgpu share --image myorg/custom    # your own image
+```
+
+With mixed generations, one image has to serve all shared GPUs, so it targets
+the weakest card — except when a Blackwell card is present, which forces CUDA
+12.8 since no older image can run it at all. `doctor` warns when that happens.
+
 ## Commands
 
 **GPU owner**

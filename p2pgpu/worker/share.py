@@ -24,6 +24,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from p2pgpu.common.config import CONFIG_DIR
+from p2pgpu.worker import gpu_compat
 
 CONTAINER_NAME = "p2pgpu-share"
 DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
@@ -175,9 +176,26 @@ def _save_session(session: ShareSession) -> None:
     SESSION_FILE.chmod(0o600)
 
 
+def resolve_image(explicit: str | None, gpu_selection: str = "all") -> tuple[str, str]:
+    """Pick the container image for whatever GPU this host actually has.
+
+    An explicit --image always wins; otherwise we match the card generation and
+    driver version, because one hardcoded CUDA version cannot serve a GTX 1080
+    and an RTX 5090 at the same time.
+    """
+    if explicit:
+        return explicit, "explicitly requested"
+
+    profiles = gpu_compat.detect_gpus()
+    if gpu_selection not in ("", "all"):
+        wanted = {int(part) for part in gpu_selection.split(",") if part.strip().isdigit()}
+        profiles = [p for p in profiles if p.index in wanted] or profiles
+    return gpu_compat.recommend_image(profiles)
+
+
 def start_share(
     hours: float = 4.0,
-    image: str = DEFAULT_IMAGE,
+    image: str | None = None,
     port: int = DEFAULT_PORT,
     bind_ip: str | None = None,
     shm_size: str = "8g",
@@ -188,6 +206,13 @@ def start_share(
         raise ShareError(
             f"A share is already running. Stop it first with 'p2pgpu stop'."
         )
+
+    try:
+        gpu_flag = gpu_compat.format_gpu_flag(gpus)
+    except ValueError as exc:
+        raise ShareError(str(exc)) from exc
+
+    image, _reason = resolve_image(image, gpus)
 
     ip = bind_ip or tailscale_ip()
     if ip is None:
@@ -211,7 +236,7 @@ def start_share(
     cmd = [
         "docker", "run", "-d", "--rm",
         "--name", CONTAINER_NAME,
-        "--gpus", gpus,
+        "--gpus", gpu_flag,
         "--shm-size", shm_size,          # PyTorch dataloaders die on the 64 MB default
         "-e", f"JUPYTER_TOKEN={token}",
         # Binding to the overlay IP, not 0.0.0.0, keeps this off the host's LAN

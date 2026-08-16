@@ -88,19 +88,23 @@ def probe() -> None:
 @app.command()
 def share(
     hours: float = typer.Option(4.0, help="Auto-stop after this many hours."),
-    image: str = typer.Option("", help="Docker image to run (default: PyTorch CUDA)."),
+    image: str = typer.Option("", help="Override the container image (default: auto-detected)."),
     port: int = typer.Option(8888, help="Port for the notebook server."),
     bind_ip: str = typer.Option("", help="Override the bind address (default: Tailscale IP)."),
-    gpus: str = typer.Option("all", help="Which GPUs to pass through, e.g. '\"device=0\"'."),
+    gpu: str = typer.Option("all", help="Which GPUs to share: 'all', '0', or '0,1'."),
     skip_checks: bool = typer.Option(False, help="Skip host preflight checks."),
 ) -> None:
     """Share this machine's GPU with your friend for a fixed time.
+
+    Works with any CUDA GPU from Pascal (GTX 10-series) to Blackwell (RTX
+    50-series) -- the container image is chosen automatically from the card's
+    compute capability and the installed driver.
 
     Runs a container with the GPU passed through and a notebook server bound to
     your Tailscale address. Your files stay out of it -- only ~/p2pgpu-workspace
     is mounted. The share stops itself when the time is up.
     """
-    from p2pgpu.worker import share as sharing
+    from p2pgpu.worker import gpu_compat, share as sharing
 
     if not skip_checks:
         problems = sharing.preflight(require_tailscale=not bind_ip)
@@ -110,14 +114,18 @@ def share(
                 console.print(f"  [red]x[/] {problem}")
             raise typer.Exit(1)
 
+    chosen_image, reason = sharing.resolve_image(image or None, gpu)
+    for note in gpu_compat.compatibility_notes(gpu_compat.detect_gpus()):
+        console.print(f"[yellow]note:[/] {note}")
+    console.print(f"image: [cyan]{chosen_image}[/] [dim]({reason})[/]")
     console.print(f"Starting share ({hours}h)... first run pulls the image, be patient.")
     try:
         session = sharing.start_share(
             hours=hours,
-            image=image or sharing.DEFAULT_IMAGE,
+            image=image or None,
             port=port,
             bind_ip=bind_ip or None,
-            gpus=gpus,
+            gpus=gpu,
         )
     except sharing.ShareError as exc:
         console.print(f"[red]{exc}[/]")
@@ -182,9 +190,11 @@ def logs(lines: int = typer.Option(50, help="How many lines to show.")) -> None:
 
 
 @app.command()
-def doctor() -> None:
+def doctor(
+    quick: bool = typer.Option(False, help="Skip the container GPU test (no image pull)."),
+) -> None:
     """Check whether this machine can share its GPU, and say what's missing."""
-    from p2pgpu.worker import share as sharing
+    from p2pgpu.worker import gpu_compat, share as sharing
 
     table = Table(title="Host readiness", show_header=False)
     ts_ip = sharing.tailscale_ip()
@@ -199,12 +209,37 @@ def doctor() -> None:
         table.add_row("Tailscale IP", ts_ip)
     console.print(table)
 
+    profiles = gpu_compat.detect_gpus()
+    if profiles:
+        gtable = Table(title="Detected GPUs")
+        for column in ("#", "name", "arch", "cc", "VRAM", "driver"):
+            gtable.add_column(column)
+        for profile in profiles:
+            gtable.add_row(
+                str(profile.index),
+                profile.name,
+                profile.architecture,
+                profile.compute_capability or "?",
+                f"{profile.vram_mb / 1024:.0f} GB",
+                profile.driver_version or "?",
+            )
+        console.print(gtable)
+
+        image, reason = gpu_compat.recommend_image(profiles)
+        console.print(f"selected image: [cyan]{image}[/]\n[dim]{reason}[/]")
+        for note in gpu_compat.compatibility_notes(profiles):
+            console.print(f"[yellow]note:[/] {note}")
+
     problems = sharing.preflight()
     if problems:
         console.print("\n[yellow]To fix:[/]")
         for problem in problems:
             console.print(f"  · {problem}")
         raise typer.Exit(1)
+
+    if quick:
+        console.print("\n[green]Prerequisites look good.[/] Re-run without --quick to test passthrough.")
+        return
 
     console.print("\nRunning a real GPU passthrough test (may pull ~200 MB)...")
     ok, detail = sharing.verify_gpu_passthrough()

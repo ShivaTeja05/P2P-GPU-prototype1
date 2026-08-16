@@ -36,6 +36,39 @@ Entry format:
 
 ---
 
+## 2026-08-16 — Works with any NVIDIA GPU, not one hardcoded image
+
+**Status:** Unchanged otherwise — still needs a real run on NVIDIA hardware.
+
+**Changed:**
+- `worker/gpu_compat.py` — detects each GPU's compute capability, architecture
+  and driver version, then picks a container image that can actually run it.
+- `share --gpu 0 | 0,1 | all` selects which cards to hand over.
+- `doctor` now prints a GPU table (name, arch, cc, VRAM, driver), the image it
+  would choose and why, plus warnings. Added `--quick` to skip the image pull.
+- 30 tests covering the generation/driver matrix.
+
+**Why:**
+- *One hardcoded CUDA image breaks in both directions.* CUDA 12.x needs driver
+  >= 525.60.13; below that a 12.x container starts and then dies. And RTX
+  50-series is Blackwell/sm_120, which only got PyTorch kernels in 2.7 + CUDA
+  12.8 — older images see the GPU then fail with "no kernel image is available
+  for execution on the device". Both look like a bug in this tool rather than a
+  version mismatch, so they are detected up front.
+- *Mixed generations target the weakest card,* since one image must serve all
+  of them — except when a Blackwell card is present, which forces 12.8 because
+  no older image can run it at all.
+- *`format_gpu_flag` rejects malformed input* rather than defaulting to `all`.
+  Silently sharing every GPU because of a typo is the wrong failure direction.
+
+**Measured:** 41 tests pass. Verified selection by hand across GTX 1080 →
+RTX 5090: Pascal and old-driver cards get CUDA 11.8, Turing/Ampere/Ada get
+12.4, Blackwell gets 12.8.
+
+**Next:** unchanged — real run on the friend's machine.
+
+---
+
 ## 2026-08-16 — `p2pgpu share` built; project scoped to two machines
 
 **Status:** Feature-complete for the two-machine case. Blocked only on doing a
