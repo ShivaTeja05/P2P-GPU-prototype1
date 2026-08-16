@@ -10,6 +10,10 @@ This is the same mechanism GPU rental marketplaces use for their hosts (a Docker
 container with the GPU passed through), minus the marketplace, the billing, and
 the strangers.
 
+> ### 👉 New here? Start with **[GUIDE.md](GUIDE.md)**
+> Step-by-step for both people, no jargon, Windows / macOS / Linux.
+> The rest of this README is the technical summary.
+
 ```
 your Mac  ──── Tailscale (encrypted, through both routers) ────  friend's PC
                                                                       │

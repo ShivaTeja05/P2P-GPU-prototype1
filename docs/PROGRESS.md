@@ -36,6 +36,28 @@ Entry format:
 
 ---
 
+## 2026-08-16 — GUIDE.md as the front door
+
+**Status:** Docs complete. Still awaiting the real NVIDIA hardware run.
+
+**Changed:** Added `GUIDE.md` — one beginner-facing walkthrough covering both
+sides, split into "I'm lending my GPU" and "I'm borrowing a GPU" so nobody reads
+the half that doesn't apply to them. README now points at it first.
+
+**Why:** SETUP/WINDOWS/SECURITY are good reference but assume too much for a
+first-timer, and the information was spread across three files. Someone landing
+on the repo needs one link, one track, and a checkpoint at every step. The guide
+uses explicit "you should see X" checks so people can tell whether a step
+actually worked rather than discovering it three steps later.
+
+Also folds in the two things people most reliably get wrong: the Tailscale
+share-invite step (easy to skip entirely, and nothing works without it), and
+installing Linux NVIDIA drivers inside WSL.
+
+**Next:** unchanged — friend runs Setup.bat, then Check-Setup.bat.
+
+---
+
 ## 2026-08-16 — Windows double-click setup
 
 **Status:** Windows users need no terminal. Still awaiting a real hardware run.
