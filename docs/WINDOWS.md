@@ -86,7 +86,10 @@ Skips Docker entirely. Installs Python, uv and Tailscale.
 
 ### 2. Sign in to Tailscale
 
-Same account as your friend.
+Use your own account — you do not need your friend's login. Ask them to go to
+their Tailscale admin console, find their GPU machine, click **Share...** and
+send you the invite. Accept it, and that machine shows up in your own device
+list.
 
 ### 3. Copy the URL your friend sent you
 
@@ -142,9 +145,9 @@ in that order.
 
 **Friend can't reach the URL**
 Run `Sharing-Status.bat` to confirm the share is alive. Then have both of you
-check Tailscale is connected and signed into the same account. The URL contains
-a `100.x.y.z` address — that only works over Tailscale, never over a plain
-internet connection.
+check Tailscale is connected — and if you used node sharing, that the invite was
+accepted. The URL contains a `100.x.y.z` address, which only works over
+Tailscale; it is not reachable from the plain internet, by design.
 
 **Everything worked, then stopped**
 The share expired. Run `Share-My-GPU.bat` again — it mints a fresh URL, and the
