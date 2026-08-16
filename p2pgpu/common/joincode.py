@@ -42,6 +42,11 @@ class JoinCode:
     tailscale_authkey: str
     cluster_token: str
     issued_by: str = ""
+    # Which control plane to authenticate against. Empty means Tailscale's own.
+    # Carrying it in the code is what makes moving to a self-hosted Headscale a
+    # non-event for everyone joining: they paste a code as usual and land on the
+    # new server without being told it changed.
+    login_server: str = ""
     version: int = CODE_VERSION
 
     def encode(self) -> str:
@@ -51,16 +56,28 @@ class JoinCode:
             "tok": self.cluster_token,
             "by": self.issued_by,
         }
+        # Optional, and omitted when unset, so codes stay short and older
+        # readers ignore it cleanly.
+        if self.login_server:
+            payload["srv"] = self.login_server
         raw = json.dumps(payload, separators=(",", ":")).encode()
         # urlsafe + stripped padding so the code survives chat apps, which love
         # to mangle '+' and '/' and sometimes swallow trailing '='.
         return PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def validate_authkey(key: str) -> str:
+def validate_authkey(key: str, allow_any: bool = False) -> str:
+    """Check the shape of an auth key.
+
+    Headscale issues plain hex pre-auth keys rather than Tailscale's tskey-*
+    format, so the prefix check is skipped once a self-hosted login server is
+    involved -- otherwise switching control planes would look like a typo.
+    """
     key = key.strip()
     if not key:
-        raise JoinCodeError("Tailscale auth key is empty.")
+        raise JoinCodeError("Auth key is empty.")
+    if allow_any:
+        return key
     if not key.startswith(TS_KEY_PREFIXES):
         raise JoinCodeError(
             "That does not look like a Tailscale auth key. They start with "
@@ -107,16 +124,25 @@ def decode(code: str) -> JoinCode:
         raise JoinCodeError("Join code is missing part of its contents.")
 
     return JoinCode(
-        tailscale_authkey=validate_authkey(authkey),
+        tailscale_authkey=validate_authkey(
+            authkey, allow_any=bool(payload.get("srv"))
+        ),
         cluster_token=token,
         issued_by=str(payload.get("by") or ""),
+        login_server=str(payload.get("srv") or ""),
         version=version,
     )
 
 
-def build(authkey: str, cluster_token: str) -> JoinCode:
+def build(authkey: str, cluster_token: str, login_server: str = "") -> JoinCode:
+    server = login_server.strip().rstrip("/")
+    if server and not server.startswith(("http://", "https://")):
+        raise JoinCodeError(
+            "A login server must be a URL, e.g. https://headscale.example.com"
+        )
     return JoinCode(
-        tailscale_authkey=validate_authkey(authkey),
+        tailscale_authkey=validate_authkey(authkey, allow_any=bool(server)),
         cluster_token=cluster_token.strip(),
         issued_by=platform.node(),
+        login_server=server,
     )

@@ -143,7 +143,9 @@ def tailscale_ip() -> str | None:
     return first[0].strip() if first else None
 
 
-def tailscale_up(authkey: str, timeout_s: int = 120) -> tuple[bool, str]:
+def tailscale_up(
+    authkey: str, login_server: str = "", timeout_s: int = 120
+) -> tuple[bool, str]:
     """Join a tailnet using a pre-authorised key -- no browser, no admin console.
 
     On Linux and macOS this touches privileged networking state and usually
@@ -157,6 +159,10 @@ def tailscale_up(authkey: str, timeout_s: int = 120) -> tuple[bool, str]:
         )
 
     cmd = [exe, "up", f"--auth-key={authkey}", "--accept-routes"]
+    if login_server:
+        # The same Tailscale client speaks to any compatible control plane, so
+        # self-hosting is a flag rather than a fork.
+        cmd.append(f"--login-server={login_server}")
     if platform.system() != "Windows" and shutil.which("sudo"):
         cmd = ["sudo", "-n", *cmd]  # -n: fail rather than hang on a password prompt
 

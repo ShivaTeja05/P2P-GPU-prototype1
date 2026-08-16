@@ -252,3 +252,32 @@ def test_default_images_are_runtime_not_devel():
     for _cc, _drv, image, _note in IMAGE_MATRIX:
         assert image.endswith("-runtime"), image
     assert FALLBACK_IMAGE.endswith("-runtime")
+
+
+def test_join_code_carries_a_self_hosted_control_plane():
+    """Moving to your own Headscale must be invisible to whoever is joining."""
+    from p2pgpu.common import joincode
+
+    code = joincode.build("abc123hexkey", "tok", "https://headscale.example.com")
+    decoded = joincode.decode(code.encode())
+    assert decoded.login_server == "https://headscale.example.com"
+    # Headscale issues plain hex keys, not tskey-*, so the prefix check relaxes.
+    assert decoded.tailscale_authkey == "abc123hexkey"
+
+
+def test_login_server_must_be_a_url():
+    import pytest as _pytest
+
+    from p2pgpu.common import joincode
+
+    with _pytest.raises(joincode.JoinCodeError, match="must be a URL"):
+        joincode.build("tskey-auth-x", "tok", "headscale.example.com")
+
+
+def test_codes_without_a_server_still_require_a_tailscale_key():
+    import pytest as _pytest
+
+    from p2pgpu.common import joincode
+
+    with _pytest.raises(joincode.JoinCodeError):
+        joincode.build("plain-hex-key", "tok")

@@ -75,7 +75,10 @@ def init(
 
 @app.command()
 def invite(
-    authkey: str = typer.Option("", help="Tailscale auth key (tskey-auth-...)."),
+    authkey: str = typer.Option("", help="Auth key (tskey-auth-... or a Headscale key)."),
+    login_server: str = typer.Option(
+        "", help="Your own control plane, e.g. https://headscale.example.com"
+    ),
 ) -> None:
     """Create a join code to send to whoever is joining your cluster.
 
@@ -103,11 +106,13 @@ def invite(
         authkey = typer.prompt("Paste the auth key (tskey-auth-...)").strip()
 
     try:
-        code = joincode.build(authkey, token)
+        code = joincode.build(authkey, token, login_server)
     except joincode.JoinCodeError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
 
+    if code.login_server:
+        console.print(f"control plane: [cyan]{code.login_server}[/] [dim](self-hosted)[/]")
     console.print(Panel(code.encode(), title="join code", border_style="green"))
     console.print("They run: [cyan]p2pgpu join <code>[/]  (or paste it into the app)")
     console.print(
@@ -140,7 +145,9 @@ def join(
         console.print(f"[dim]code issued by {parsed.issued_by}[/]")
 
     console.print("1/3  joining the tailnet...")
-    ok, detail = sharing.tailscale_up(parsed.tailscale_authkey)
+    if parsed.login_server:
+        console.print(f"     [dim]control plane: {parsed.login_server}[/]")
+    ok, detail = sharing.tailscale_up(parsed.tailscale_authkey, parsed.login_server)
     if not ok:
         console.print(f"[red]{detail}[/]")
         raise typer.Exit(1)
