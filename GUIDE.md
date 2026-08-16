@@ -229,7 +229,7 @@ JupyterLab opens in your browser. **You're on their GPU.**
 
 ## Step B5 — Confirm you really have the GPU
 
-In a notebook cell:
+Quick version — paste into a notebook cell:
 
 ```python
 import torch
@@ -238,6 +238,16 @@ print(torch.cuda.get_device_name(0))
 ```
 
 ✅ **You want:** `True` and something like `NVIDIA GeForce RTX 4080`.
+
+**Proper version:** copy the contents of
+[`examples/verify_gpu.py`](examples/verify_gpu.py) into a cell and run it. It
+takes ~30 seconds and checks the whole chain — GPU visible, kernels compute
+correctly, raw speed in TFLOP/s, and a real 100-step training loop with the loss
+going down.
+
+Worth running the first time. `cuda.is_available()` returning `True` does not
+prove the kernels match your card; a wrong image passes that check and then
+fails on the first real operation.
 
 That's it. Train something.
 
