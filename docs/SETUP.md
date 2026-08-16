@@ -15,7 +15,38 @@ Install from [tailscale.com/download](https://tailscale.com/download), then:
 sudo tailscale up
 ```
 
-Sign in with the **same account on both machines**. Check it worked:
+### Which account should each of you use?
+
+You do **not** have to share one login. Three options:
+
+| | How | Who sees what | Verdict |
+|---|---|---|---|
+| **Same account** | Both sign into one login | everything | Works, but you're sharing credentials |
+| **Invite to your tailnet** | Friend gets their own login, joins your tailnet | all devices on the tailnet | Fine for close friends |
+| **Node sharing** | Each keeps their own tailnet; they share *only* the GPU machine | just that one machine | **Recommended** |
+
+**Node sharing** is the right default. You each keep your own identity, and you
+get access to exactly one machine instead of their whole home network.
+
+The GPU owner does this:
+
+1. Open the [admin console](https://login.tailscale.com/admin/machines) → Machines
+2. Find the GPU machine → **Share...**
+3. Send the invite link to the person borrowing it
+
+The borrower accepts, and that machine appears in their own Machines list with
+its `100.x.y.z` address — reachable exactly as if it were their own device.
+
+Tailscale **quarantines shared machines by default**: the shared machine can
+*receive* connections from your tailnet but cannot *initiate* them into it.
+That's the right direction for us — you connect in to the notebook, and their
+GPU box gets no ability to reach back into your network.
+
+The free Personal plan covers 6 users with unlimited personal devices, so none
+of this costs anything. If either side has a custom ACL policy file, make sure
+it permits the shared device; the default policy already does.
+
+### Check it worked
 
 ```bash
 tailscale ip -4

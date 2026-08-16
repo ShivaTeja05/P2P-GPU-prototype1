@@ -91,7 +91,7 @@ def share(
     image: str = typer.Option("", help="Override the container image (default: auto-detected)."),
     port: int = typer.Option(8888, help="Port for the notebook server."),
     bind_ip: str = typer.Option("", help="Override the bind address (default: Tailscale IP)."),
-    gpu: str = typer.Option("all", help="Which GPUs to share: 'all', '0', or '0,1'."),
+    gpu: str = typer.Option("all", help="Which GPUs to share: 'all', '0', '0,1', or 'none'."),
     skip_checks: bool = typer.Option(False, help="Skip host preflight checks."),
 ) -> None:
     """Share this machine's GPU with your friend for a fixed time.
@@ -107,7 +107,10 @@ def share(
     from p2pgpu.worker import gpu_compat, share as sharing
 
     if not skip_checks:
-        problems, warnings = sharing.preflight(require_tailscale=not bind_ip)
+        problems, warnings = sharing.preflight(
+            require_tailscale=not bind_ip,
+            require_gpu=gpu.strip().lower() != "none",
+        )
         for warning in warnings:
             console.print(f"[yellow]warning:[/] {warning}")
         if problems:

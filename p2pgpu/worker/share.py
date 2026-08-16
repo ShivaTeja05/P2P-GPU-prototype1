@@ -156,8 +156,15 @@ def verify_gpu_passthrough(image: str = "nvidia/cuda:12.4.0-base-ubuntu22.04") -
     return False, (result.stderr or result.stdout).strip()
 
 
-def preflight(require_tailscale: bool = True) -> tuple[list[str], list[str]]:
-    """Check the host. Returns (blocking problems, non-blocking warnings)."""
+def preflight(
+    require_tailscale: bool = True,
+    require_gpu: bool = True,
+) -> tuple[list[str], list[str]]:
+    """Check the host. Returns (blocking problems, non-blocking warnings).
+
+    require_gpu is False when the caller asked for '--gpu none', where demanding
+    an NVIDIA runtime would be nonsense.
+    """
     problems: list[str] = []
     warnings: list[str] = []
     on_windows = platform.system() == "Windows"
@@ -168,7 +175,7 @@ def preflight(require_tailscale: bool = True) -> tuple[list[str], list[str]]:
             "(Linux) or Docker Desktop with the WSL2 backend (Windows), and "
             "make sure it is actually started."
         )
-    elif not nvidia_runtime_registered():
+    elif require_gpu and not nvidia_runtime_registered():
         message = (
             "Docker does not list an NVIDIA runtime. On Linux, install the "
             "NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/"
@@ -286,7 +293,7 @@ def start_share(
     cmd = [
         "docker", "run", "-d", "--rm",
         "--name", CONTAINER_NAME,
-        "--gpus", gpu_flag,
+        *(["--gpus", gpu_flag] if gpu_flag else []),
         "--shm-size", shm_size,          # PyTorch dataloaders die on the 64 MB default
         "-e", f"JUPYTER_TOKEN={token}",
         # Binding to the overlay IP, not 0.0.0.0, keeps this off the host's LAN

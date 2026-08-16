@@ -39,9 +39,14 @@ Once installed, open Docker Desktop and:
 
 ### 3. Sign in to Tailscale
 
-Open Tailscale from the Start menu and sign in with the **same account your
-friend uses**. This is what lets the two machines find each other through both
-home routers, with nothing exposed to the internet.
+Open Tailscale from the Start menu and sign in. This is what lets the two
+machines find each other through both home routers, with nothing exposed to the
+internet — it works across cities and countries, not just your house.
+
+You do **not** need to share a login with your friend. Best option: sign in with
+your own account, then in the [admin console](https://login.tailscale.com/admin/machines)
+find this PC and click **Share...**, and send the invite to your friend. They
+accept, and they can reach this one machine — not the rest of your network.
 
 ### 4. Double-click `Check-Setup.bat`
 

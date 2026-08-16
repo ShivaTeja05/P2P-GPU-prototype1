@@ -233,15 +233,22 @@ def compatibility_notes(profiles: list[GpuProfile]) -> list[str]:
     return notes
 
 
-def format_gpu_flag(selection: str) -> str:
+def format_gpu_flag(selection: str) -> str | None:
     """Turn a friendly selection into Docker's --gpus value.
 
     'all' -> all; '0' -> device 0; '0,1' -> devices 0 and 1.
+    'none' -> None, meaning omit --gpus entirely (CPU-only container). That
+    exists so the whole share/attach path can be exercised on a machine with no
+    NVIDIA GPU -- a Mac, or CI.
     """
-    selection = selection.strip()
+    selection = selection.strip().lower()
+    if selection == "none":
+        return None
     if not selection or selection == "all":
         return "all"
     indices = [part.strip() for part in selection.split(",") if part.strip()]
     if not all(part.isdigit() for part in indices):
-        raise ValueError(f"invalid GPU selection: {selection!r} (use 'all', '0', or '0,1')")
+        raise ValueError(
+            f"invalid GPU selection: {selection!r} (use 'all', 'none', '0', or '0,1')"
+        )
     return f'"device={",".join(indices)}"'
