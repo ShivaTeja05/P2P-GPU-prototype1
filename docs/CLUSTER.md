@@ -72,16 +72,19 @@ NVLink-class latency, and there is no way around that over the internet.
 Verified by running the actual image, not by reading the Dockerfile:
 
 ```
-pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
-  torch        2.5.1+cu124   ✅
-  torchvision  0.20.1+cu124  ✅   (so the MNIST example works)
+pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime      measured on a live RTX 4050 session
+  torch        2.5.1+cu124   ✅        GPU visible, 6.0 GB total / 4.95 GB free
+  torchvision  0.20.1+cu124  ✅        so the MNIST example works
   numpy        2.1.2         ✅
-  httpx        MISSING       ❌   ← why the example uses stdlib urllib
+  httpx        0.28.1        ⚠️        present, but only as a jupyterlab dependency
+  p2pgpu       absent        ❌        never installed in the container
 ```
 
-That missing `httpx` is the reason `examples/cluster_train.py` talks to the
-coordinator with `urllib` instead of importing `p2pgpu`. `p2pgpu` is not
-installed inside the container either. The script is self-contained on purpose.
+`httpx` is not in the base image — it arrives because the container runs
+`pip install jupyterlab` at start, and jupyterlab pulls it in. That is a
+transitive dependency of an unrelated package, which is exactly the kind of
+thing that disappears in a version bump. So `examples/cluster_train.py` uses
+stdlib `urllib` and depends on nothing but torch.
 
 Have both GPU machines pull the image **before** the session, not during:
 
@@ -190,10 +193,14 @@ Run both cells. The first one to start waits for the second.
 
 > **If a notebook says `Could not reach the coordinator`, this is the fix.**
 >
-> The GPU machine is on the tailnet, but the *container* may not be. On Windows
+> The GPU machine may be on the tailnet while the *container* is not. On Windows
 > the container's host is the WSL2 VM, and the Windows Tailscale interface does
-> not live there — so `100.x.y.z` has no route from inside the container even
-> though the machine itself reaches it fine.
+> not live there — so `100.x.y.z` may have no route from inside the container
+> even though the machine itself reaches it fine.
+>
+> **Check the coordinator's own machine first.** A firewall there produces an
+> identical symptom, and it is the more common cause. On macOS, "Block all
+> incoming connections" silently drops everything; see the setup guide.
 >
 > On that friend's machine, in a second terminal:
 >
@@ -201,11 +208,16 @@ Run both cells. The first one to start waits for the second.
 > p2pgpu cluster relay --coordinator http://100.x.y.z:8899
 > ```
 >
-> Then change one line in their notebook and re-run:
+> Then point their notebook at **that machine's own Tailscale IP** — the one
+> `tailscale ip -4` prints there, not the coordinator's:
 >
 > ```python
-> COORDINATOR = "http://host.docker.internal:8899"
+> COORDINATOR = "http://100.102.129.101:8899"
 > ```
+>
+> Not `host.docker.internal` — measured inside a real session container, that
+> alias does not resolve at all, while the host's own Tailscale address answered
+> in 3 ms.
 >
 > The relay forwards over that machine's own Tailscale connection. It adds a
 > hop, not a privilege — it only carries traffic the tailnet already allows.
@@ -292,7 +304,7 @@ dead on arrival. The stall is paid once and amortised over hundreds of steps.
 | Symptom | Cause |
 |---|---|
 | `waited 300s for 2 nodes; only 1 joined` | Second node not started, or both used the same `NODE_ID`. |
-| `Could not reach the coordinator` | Coordinator not running; or the GPU machine is off the tailnet (`tailscale status`); or the machine is on but the *container* is not — run `p2pgpu cluster relay` on the GPU machine and point the script at `host.docker.internal`. |
+| `Could not reach the coordinator` | Coordinator not running; or the GPU machine is off the tailnet (`tailscale status`); or the machine is on but the *container* is not, which is the normal case on Windows — run `p2pgpu cluster relay` on the GPU machine and point the script at that machine's own Tailscale IP. |
 | `nodes submitted different model shapes` | The two scripts build different architectures. They must be identical. |
 | `round N timed out with 1/2 nodes` | Someone's share expired mid-run, or their GPU is much slower. Both nodes run the *same* number of local steps, so the faster one waits. |
 | Checksums differ at the end | The averaging never landed. Check the coordinator's log; each round should show two submissions. |

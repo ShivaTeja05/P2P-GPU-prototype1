@@ -69,12 +69,24 @@ If that works, the hard networking part is done.
 git clone https://github.com/ShivaTeja05/P2P-GPU-prototype1.git && cd P2P-GPU-prototype1
 ```
 
+### Linux and macOS
+
 ```bash
 uv venv --python 3.12 && uv pip install -e .
 ```
 
 No `uv`? Install it with `curl -LsSf https://astral.sh/uv/install.sh | sh`, or
 use a normal `python3.12 -m venv .venv && .venv/bin/pip install -e .`.
+
+### Windows
+
+Double-click `Setup.bat`. It does the same thing, plus installs Python if it is
+missing and checks for Docker. It may ask you to reboot — do it, then run it
+again.
+
+If Windows says *"Windows protected your PC"* or PowerShell says *"running
+scripts is disabled"*, you downloaded the repo as a ZIP and did not unblock it:
+right-click the `.zip` → Properties → tick **Unblock** → extract again.
 
 Python 3.12 is pinned because PyTorch has no 3.14 wheels yet.
 
@@ -114,13 +126,25 @@ inside WSL, which is the classic mistake.
 3. Settings → Resources → WSL Integration → enable your distro
 4. Make sure your Windows NVIDIA driver is current
 
-Then run `p2pgpu` from inside WSL, not PowerShell.
+Then run `p2pgpu` **on Windows** — `Setup.bat` and the other `.bat` launchers,
+or `.venv\Scripts\p2pgpu.exe` directly. Not inside WSL.
+
+WSL2 is where the *container* runs; it is not where you drive it from. `p2pgpu`
+has Windows-specific handling that only takes effect when it is running on
+Windows: it finds `tailscale.exe`, which the Windows installer leaves off
+`PATH`, and it normalises Windows paths for Docker's `-v` flag. Run it from
+inside WSL and it misses both, then binds the notebook to an address your
+friend cannot reach.
 
 ### Verify
 
 ```bash
 p2pgpu doctor
 ```
+
+On Windows, double-click `Check-Setup.bat` instead — same check, and it saves
+the output to `check-setup-output.txt`, which is the file to send if you need
+help.
 
 This checks Docker, the NVIDIA runtime and Tailscale, then actually runs
 `nvidia-smi` inside a container. If it prints your GPU, you're ready.

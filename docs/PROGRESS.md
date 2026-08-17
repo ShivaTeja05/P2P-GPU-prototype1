@@ -46,6 +46,105 @@ Entry format:
 
 ---
 
+## 2026-08-17 — Real RTX 4050 verified; a networking conclusion retracted; the Mac's firewall found
+
+**Status:** The GPU half is confirmed working on real hardware. A networking
+conclusion I drew in this same session was **wrong and is retracted below** —
+the test had an uncontrolled variable. The investigation did surface a genuine
+blocker for the real run, on my own machine rather than the friend's.
+
+**What was measured**, against a live share from the Windows RTX 4050 laptop
+(Linux 6.6 WSL2 kernel, container from the stock session image):
+
+```
+GPU          NVIDIA GeForce RTX 4050 Laptop, 6.0 GB total / 4.95 GB free, cc 8.9
+torch        2.5.1+cu124, cuda available
+matmul       matches CPU reference, max diff 4.58e-04
+throughput   21.4 TFLOP/s  (fp16, 4096^3)
+training     loss 62.539 -> 0.0142 over 200 steps in 0.51 s, 104 MB peak
+link         RTT min 58 ms / avg 147 ms — noticeably more variable than v1's 84-110 ms
+```
+
+**The networking probes, from inside the friend's container:**
+
+```
+pypi.org:443                       OK       124 ms   internet works
+100.102.129.101:8888  (own host)   OK         3 ms   its own host works
+host.docker.internal:8899          BLOCKED  DNS      the alias does not resolve
+100.65.244.36:8899    (the Mac)    BLOCKED  timeout  ← INCONCLUSIVE, see below
+```
+
+**Retraction.** I first read that last line as proof that a container on Windows
+cannot route to another machine's Tailscale address, and wrote it into
+CLUSTER.md, CLUSTER-SETUP.md and the relay's own docstrings as a measured fact.
+It is not one. I never verified the *control*: that anything at all could reach
+that coordinator. Checking afterwards:
+
+```
+coordinator bound 0.0.0.0:8916, probed from the Mac itself
+  127.0.0.1:8916        {"ok":true,...}     works
+  100.65.244.36:8916    empty reply (52)    blocked
+  192.168.0.3:8916      empty reply (52)    blocked   ← LAN too, so not Tailscale
+
+socketfilterfw --getglobalstate
+  Firewall is blocking all non-essential incoming connections. (State = 2)
+```
+
+The macOS Application Firewall was refusing every inbound connection on every
+non-loopback interface. Nothing could have reached that port — not the friend's
+container, not anything. The container's timeout says nothing about WSL2. The
+WSL2 question is **still open**, exactly as it was before.
+
+The tell was there and I walked past it: the container *timed out* while the Mac
+itself got an *empty reply*. Two different failures against the same port should
+have prompted the control test before the conclusion.
+
+**What the probes do still support**, since these depend only on the friend's
+machine and not on mine:
+
+- *`host.docker.internal` is the wrong address to document.* It is the obvious
+  Docker alias, and it does not resolve inside the session container at all —
+  a DNS failure entirely local to that container. The GPU machine's own
+  Tailscale address answered in 3 ms, so that is what the docs now recommend.
+  This one holds regardless of the firewall.
+- *A container can reach its own host over the tailnet* (3 ms), which is the
+  asymmetry the relay is built on.
+
+**The genuine blocker this turned up:** the coordinator cannot accept
+connections on this Mac at all until the firewall allows it. That would have
+stopped the real run dead, with the failure appearing to be on the friends'
+side. Fix before the session:
+
+```
+System Settings → Network → Firewall → Options → allow incoming for python,
+or turn "Block all incoming connections" off
+```
+
+**Also corrected:** `httpx` *is* present in a running session (0.28.1), contrary
+to the earlier note. It is absent from the base image and arrives only because
+the container runs `pip install jupyterlab` at start. Depending on a transitive
+dependency of an unrelated package is exactly what disappears in a version bump,
+so `examples/cluster_train.py` stays on stdlib `urllib` — the conclusion holds,
+but the stated fact was wrong and is now accurate.
+
+**Fixed in docs/SETUP.md:** it told Windows users to "run `p2pgpu` from inside
+WSL, not PowerShell", which contradicts the `.bat` flow that actually worked.
+`setup.ps1` builds a Windows-native venv, and `share.py` has Windows-only
+handling — finding `tailscale.exe` off `PATH`, normalising paths for Docker's
+`-v` — that never runs under WSL. The install and verify sections were also
+Unix-only; both now have a Windows track.
+
+**Next:**
+1. Allow incoming connections to the coordinator on the Mac. Nothing works
+   until this is done, and it is invisible from the other side.
+2. Re-run the container reachability probe with a coordinator that can actually
+   answer. Only then is the WSL2 question settled either way.
+3. Whether a relay on the friend's machine is reachable from its own container
+   at `100.102.129.101:8899` — implied by the 3 ms result on port 8888, but not
+   run, because that machine still has the pre-cluster code.
+
+---
+
 ## 2026-08-17 — Windows readiness sweep, and an IPv6 bug from v1
 
 **Status:** The container path is proven against the real image. Two bugs

@@ -968,16 +968,21 @@ def cluster_relay(
 ) -> None:
     """Let the session container reach the coordinator. Run on the GPU machine.
 
-    Only needed if the training script inside the notebook cannot reach the
-    coordinator's Tailscale address. That happens on Windows, where the
-    container's host is the WSL2 VM rather than Windows itself, so the Windows
-    Tailscale interface is not visible to it.
+    Needed when the notebook cannot reach the coordinator's Tailscale address
+    but this machine can. That happens on Windows, where the container's host is
+    the WSL2 VM and the Windows Tailscale interface does not live there.
 
-    With this running, point the script at http://host.docker.internal:8899
-    instead of the coordinator's 100.x address.
+    If this machine cannot reach the coordinator either, the relay refuses to
+    start and says so -- usually a firewall on the coordinator, which looks
+    identical from inside the container and is the more common cause.
+
+    With this running, point the training script at THIS machine's own Tailscale
+    IP -- the address printed below -- not the coordinator's, and not
+    host.docker.internal, which does not resolve inside the session container.
     """
     from p2pgpu.cluster.relay import RelayError, reachable
     from p2pgpu.cluster.relay import serve as run_relay
+    from p2pgpu.worker.share import bracket_host
 
     token = _require_token()
     ok, detail = reachable(coordinator, token)
@@ -989,6 +994,26 @@ def cluster_relay(
         )
         raise typer.Exit(1)
     console.print("[green]Coordinator reachable from this machine.[/] Relaying it inward.")
+
+    # Print the exact string to paste. The container cannot route to another
+    # machine on the tailnet, but it reaches THIS host's tailnet address fine --
+    # so that, not host.docker.internal, is what the notebook must point at.
+    ips = _tailscale_ips()
+    if ips:
+        console.print("\nIn the notebook on this machine, set:")
+        for addr in ips:
+            console.print(
+                f'  [cyan]COORDINATOR = "http://{escape(bracket_host(addr))}:{listen_port}"[/]'
+            )
+        console.print(
+            "[dim]This machine's own Tailscale address — not the coordinator's, "
+            "and not host.docker.internal.[/]\n"
+        )
+    else:
+        console.print(
+            "[yellow]No Tailscale address found on this machine,[/] so there is no "
+            "address to give the notebook. Check [cyan]tailscale status[/].\n"
+        )
 
     try:
         run_relay(

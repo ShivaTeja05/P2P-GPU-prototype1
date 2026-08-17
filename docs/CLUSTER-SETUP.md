@@ -235,6 +235,40 @@ Point each GPU machine at one of these:
 **Copy that URL.** Leave this window open for the whole session — closing it
 ends the cluster.
 
+### Let it accept connections — do not skip this
+
+The coordinator is the one thing in the cluster that receives inbound
+connections. A firewall here blocks every GPU node, and the symptom appears on
+*their* screen, not yours, so it is easy to spend an hour debugging the wrong
+machine.
+
+**macOS** — check with:
+
+```bash
+/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+```
+
+If it says *"blocking all non-essential incoming connections"*, open
+**System Settings → Network → Firewall → Options** and either turn off
+**Block all incoming connections**, or add your Python binary to the allowed
+list. Nothing reaches the coordinator until you do.
+
+**Windows** — Defender Firewall prompts the first time; allow it on **private
+networks**.
+
+**Linux** — if `ufw` is active: `sudo ufw allow in on tailscale0 to any port 8899`
+
+✅ **Verify from the coordinator machine itself**, using its Tailscale address
+rather than `localhost` — that is the address the GPU nodes will use:
+
+```bash
+curl http://100.x.y.z:8899/health
+```
+
+You want `{"ok":true,"role":"coordinator",...}`. An empty reply or a hang means
+the firewall is still in the way. Testing `127.0.0.1` instead will succeed even
+when every remote machine is blocked, which is why it is the wrong check.
+
 ---
 
 # Part 4 — Rehearse before involving anyone
@@ -290,11 +324,17 @@ import urllib.request; print(urllib.request.urlopen("http://100.x.y.z:8899/healt
 - ✅ Prints `{"ok":true,...}` → carry on to 5.4
 - ❌ Times out → do **5.3b** first
 
-### 5.3b Only if that timed out — start the relay
+> **If it times out, check the coordinator's machine before blaming Windows.**
+> A firewall on the coordinator gives exactly the same symptom, and it is the
+> more likely cause — see Part 3. Measured inside a real session container, the
+> public internet and the container's own host were both reachable, so the
+> container's networking is not broken in general.
 
-On Windows, the container's host is the WSL2 virtual machine, which does not
-carry the Windows Tailscale interface. The machine is on the tailnet; the
-container is not. The relay bridges that gap.
+### 5.3b If it still times out — start the relay
+
+The container's host is the WSL2 virtual machine, which does not carry the
+Windows Tailscale interface. The relay forwards from an address the container
+*can* reach, out over the machine's own Tailscale connection.
 
 On that GPU machine, in a second terminal:
 
@@ -303,13 +343,21 @@ p2pgpu cluster relay --coordinator http://100.x.y.z:8899
 ```
 
 > Windows Defender Firewall will ask to allow it the first time. Allow it on
-> **private networks**.
+> **private networks**, or the container still will not get through.
 
-Then in that notebook, use this address instead for the rest of the steps:
+Then in that notebook, point at **that GPU machine's own Tailscale IP** — the
+address `tailscale ip -4` prints on the machine running the relay, *not* the
+coordinator's:
 
+```python
+COORDINATOR = "http://100.102.129.101:8899"   # ← the GPU machine's own address
 ```
-http://host.docker.internal:8899
-```
+
+> **Use the host's Tailscale IP, not `host.docker.internal`.** The obvious
+> choice is the documented Docker alias, but on the machine we measured it does
+> not resolve inside the container at all, while the host's own Tailscale
+> address answered in 3 ms. If your setup does resolve `host.docker.internal`,
+> that works too — try the Tailscale IP first.
 
 ## 5.4 Paste the training script into every notebook
 

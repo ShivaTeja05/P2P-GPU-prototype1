@@ -21,8 +21,18 @@ own Tailscale connection. The host is already on the tailnet, so it is only ever
 forwarding traffic that was going to be allowed anyway -- this adds a hop, not a
 privilege.
 
-Run it on the GPU machine, then point the training script at
-`http://host.docker.internal:8899` instead of the coordinator's Tailscale IP.
+Run it on the GPU machine, then point the training script at *this machine's
+own* Tailscale IP -- not the coordinator's, and not `host.docker.internal`.
+
+The Docker alias is the obvious choice and it is the wrong one: measured inside
+a real session container, `host.docker.internal` did not resolve at all, while
+the host's own Tailscale address answered in 3 ms. That asymmetry -- a container
+reaching its own host but not necessarily other machines -- is what this relay
+stands in for.
+
+Before reaching for the relay, check the coordinator's own machine: a firewall
+there blocks every node and produces exactly the same "cannot reach" symptom
+from inside the container. `reachable()` below is that check.
 """
 
 from __future__ import annotations
