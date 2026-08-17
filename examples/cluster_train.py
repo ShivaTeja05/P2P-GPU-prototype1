@@ -30,10 +30,10 @@ from torch import nn
 # CONFIG -- the only part you edit
 # ---------------------------------------------------------------------------
 
-COORDINATOR = "http://100.65.244.36:8899"   # from 'p2pgpu cluster coordinator'
-TOKEN = "PASTE-YOUR-CLUSTER-TOKEN"          # same token on every machine
-NODE_ID = "friend-a"                        # MUST differ on each machine
-WORLD_SIZE = 2                              # how many GPUs are joining
+COORDINATOR = "http://100.x.y.z:8899"   # from 'p2pgpu cluster coordinator'
+TOKEN = "PASTE-YOUR-CLUSTER-TOKEN"      # same token on every machine
+NODE_ID = "friend-a"                    # MUST differ on each machine
+WORLD_SIZE = 2                          # how many GPUs are joining
 
 ROUNDS = 10                                 # how many times we meet and average
 SYNC_EVERY = 100                            # local steps between meetings

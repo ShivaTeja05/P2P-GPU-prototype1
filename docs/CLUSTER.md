@@ -180,9 +180,9 @@ Edit the four lines at the top. **`NODE_ID` must differ on each machine**; two
 nodes with the same id are seen as one member and the cluster never forms.
 
 ```python
-COORDINATOR = "http://100.65.244.36:8899"   # from step 2
-TOKEN       = "..."                          # same on every machine
-NODE_ID     = "friend-a"                     # ← different on each!
+COORDINATOR = "http://100.x.y.z:8899"   # the exact URL step 2 printed
+TOKEN       = "..."                     # same on every machine
+NODE_ID     = "friend-a"                # ← different on each!
 WORLD_SIZE  = 2
 ```
 
@@ -198,7 +198,7 @@ Run both cells. The first one to start waits for the second.
 > On that friend's machine, in a second terminal:
 >
 > ```bash
-> p2pgpu cluster relay --coordinator http://100.65.244.36:8899
+> p2pgpu cluster relay --coordinator http://100.x.y.z:8899
 > ```
 >
 > Then change one line in their notebook and re-run:
