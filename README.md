@@ -178,7 +178,11 @@ to.** Details and the full threat model in [docs/SECURITY.md](docs/SECURITY.md).
 ## Using more than one GPU at once
 
 Two friends' GPUs can train one model together — see
-**[docs/CLUSTER.md](docs/CLUSTER.md)**. Read the first section before you start:
+**[docs/CLUSTER-SETUP.md](docs/CLUSTER-SETUP.md)** — the step-by-step, from
+which branch to download through to a running job, for Windows and Linux.
+
+For how it works and what the trade-offs are, read
+**[docs/CLUSTER.md](docs/CLUSTER.md)**. Its first section matters before you start:
 compute pools across machines, but VRAM only pools by splitting the model
 deliberately, and RAM, disk and CPU do not pool at all.
 
