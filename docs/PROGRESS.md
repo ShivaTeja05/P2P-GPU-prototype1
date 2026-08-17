@@ -46,6 +46,64 @@ Entry format:
 
 ---
 
+## 2026-08-17 — Windows readiness sweep, and an IPv6 bug from v1
+
+**Status:** The container path is proven against the real image. Two bugs
+fixed, one of which was shipped in v1.0.0.
+
+**Changed:**
+- Every user-facing address the CLI prints is now `escape()`d for rich.
+- `cluster coordinator` binds the Tailscale address by default instead of
+  `0.0.0.0`.
+- `tests/test_cli_output.py` — 10 tests, including a grep over the CLI so a new
+  unescaped print of a URL fails the suite rather than a friend's session.
+
+**Why:**
+- *IPv6 URLs were rendering with the host missing.* Commit b400e65 bracketed
+  IPv6 literals when building the share URL and the docker `-p` flag — correct,
+  and only half the problem. Rich parses `[...]` as markup, so the bracketed
+  URL printed as `http://:8888/lab?token=...`. The share panel is the string
+  the friend copies, so the failure landed on the person least able to diagnose
+  it. Same root cause as yesterday's bug, one layer further out.
+- *The coordinator handles model weights.* Binding `0.0.0.0` contradicted the
+  posture the rest of the project holds ("bind the overlay IP, not `0.0.0.0`",
+  v1.0.0). The token is not a reason to be reachable from the café Wi-Fi.
+
+**Measured — the container path, run for real rather than reasoned about:**
+
+Two `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime` containers (linux/amd64,
+the exact session image), each running `examples/cluster_train.py` against a
+coordinator on the host:
+
+```
+                container A          container B
+before sync     01658692ac0c         b5efc36ede6c
+round 2         b318ba07598b         b318ba07598b   <- identical
+```
+
+Repeated through `p2pgpu cluster relay` — same result, so the relay carries a
+full training round including multi-MB weight payloads.
+
+Image contents, verified by running it: `torch` 2.5.1+cu124, `torchvision`
+0.20.1+cu124, `numpy` 2.1.2. **`httpx` is absent**, which is why the example is
+stdlib-only. `p2pgpu` is not installed in the container either.
+
+111 tests pass.
+
+**Known gaps for the real run:**
+- `docker/Dockerfile` is unreferenced dead code — its tag is still the
+  `<yourname>/` placeholder. Sessions use stock PyTorch images and pip-install
+  jupyterlab at container start.
+- `v2.0-cluster` is not pushed. Friends can reach v1.1 on GitHub but not the
+  relay.
+- The relay listening on the Windows host will trip a Windows Defender Firewall
+  prompt the first time. Expected, not a fault.
+- Still unproven: whether a container on **Windows** can reach a Tailscale IP
+  directly. The relay exists precisely so this does not have to be answered
+  during a live session.
+
+---
+
 ## 2026-08-17 — Two machines train one model
 
 **Status:** AVERAGE mode is end-to-end complete and proven locally. The

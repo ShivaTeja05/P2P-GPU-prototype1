@@ -85,7 +85,25 @@ Two GPUs, one training run. Proven locally; not yet run on two real GPUs.
   inside the session container where `p2pgpu` is not installed
 - `docs/CLUSTER.md` — the walkthrough, including what does *not* pool
 
+### Fixed
+- **IPv6 addresses vanished from every URL the CLI printed.** Yesterday's fix
+  bracketed IPv6 literals when *building* the share URL and the docker `-p`
+  flag, but rich parses square brackets as markup tags, so a correctly
+  bracketed URL rendered as `http://:8888/lab?token=...` with the host gone.
+  This hit the share panel — the exact string the friend copies — plus the SSH
+  command, `status`, `attach`, `connect` and `bench`. A v1 bug, found while
+  auditing the cluster path. Regression-tested in `tests/test_cli_output.py`
+- `cluster coordinator` bound `0.0.0.0` by default, putting weights in flight
+  on the local network behind nothing but a token. Now binds the Tailscale
+  address like `share` does; `--host 0.0.0.0` is an explicit, warned opt-in
+
 ### Notes
+- The session image is a **stock** `pytorch/pytorch:*-runtime`. `docker/` builds
+  a nicer image with jupyterlab and sshd baked in, but nothing references it —
+  its tag is still the `<yourname>/` placeholder, so it is unused
+- Verified inside the real image: `torch`, `torchvision` and `numpy` are
+  present; **`httpx` is not**, which is why `examples/cluster_train.py` uses
+  stdlib `urllib`
 - **Only AVERAGE mode can train.** PIPELINE (splitting one model across cards)
   runs a forward pass and is numerically exact, but training through it needs
   gradients sent back up the stages, which is not built

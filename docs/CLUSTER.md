@@ -67,6 +67,30 @@ NVLink-class latency, and there is no way around that over the internet.
 
 ---
 
+## What the session container gives you
+
+Verified by running the actual image, not by reading the Dockerfile:
+
+```
+pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+  torch        2.5.1+cu124   ✅
+  torchvision  0.20.1+cu124  ✅   (so the MNIST example works)
+  numpy        2.1.2         ✅
+  httpx        MISSING       ❌   ← why the example uses stdlib urllib
+```
+
+That missing `httpx` is the reason `examples/cluster_train.py` talks to the
+coordinator with `urllib` instead of importing `p2pgpu`. `p2pgpu` is not
+installed inside the container either. The script is self-contained on purpose.
+
+Have both GPU machines pull the image **before** the session, not during:
+
+```bash
+p2pgpu prepare
+```
+
+---
+
 ## Rehearse it on one machine first
 
 Ten minutes, no friends, no GPUs. Do this before coordinating three people.

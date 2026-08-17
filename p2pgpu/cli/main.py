@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -377,16 +378,19 @@ def share(
             raise typer.Exit(1)
         console.print("[green]Ready.[/]\n")
 
+    # escape(): rich parses square brackets as markup, so a bracketed IPv6 host
+    # renders as nothing at all -- this panel is the string the friend copies,
+    # and "http://:8888/..." is a broken link they cannot debug.
     console.print(
         Panel(
-            session.url,
+            escape(session.url),
             title=f"send this to your friend - expires in {hours}h",
             border_style="green",
         )
     )
     if session.ssh_command:
         console.print(
-            Panel(session.ssh_command, title="they can also SSH in", border_style="cyan")
+            Panel(escape(session.ssh_command), title="they can also SSH in", border_style="cyan")
         )
     console.print(f"workspace (shared with the container): [cyan]{session.workspace}[/]")
     console.print("stop early with [cyan]p2pgpu stop[/]  ·  check with [cyan]p2pgpu status[/]")
@@ -409,11 +413,11 @@ def status() -> None:
     table = Table(title="Sharing active", show_header=False)
     if session:
         remaining = session.remaining_s
-        table.add_row("url", session.url)
-        table.add_row("bound to", f"{session.bind_ip}:{session.port}")
+        table.add_row("url", escape(session.url))
+        table.add_row("bound to", f"{escape(sharing.bracket_host(session.bind_ip))}:{session.port}")
         table.add_row("time left", f"{remaining / 3600:.1f} h")
         if session.ssh_command:
-            table.add_row("ssh", session.ssh_command)
+            table.add_row("ssh", escape(session.ssh_command))
         table.add_row("workspace", session.workspace)
         table.add_row("image", session.image)
     else:
@@ -582,7 +586,7 @@ def attach(
         resp = httpx.get(url, timeout=15.0, follow_redirects=True)
         reachable = resp.status_code < 400
     except httpx.HTTPError as exc:
-        console.print(f"[red]Could not reach {url}[/]")
+        console.print(f"[red]Could not reach {escape(url)}[/]")
         console.print(f"[dim]{exc}[/]")
         console.print(
             "\nCheck: is Tailscale up on both machines "
@@ -601,7 +605,7 @@ def attach(
     if open_browser:
         webbrowser.open(url)
     else:
-        console.print(url)
+        console.print(escape(url))
 
 
 @app.command()
@@ -664,7 +668,7 @@ def connect(
     target = active[0]
     console.print(f"[green]Found:[/] {target.label}")
     if target.ssh_command:
-        console.print(f"[dim]ssh available: {target.ssh_command}[/]")
+        console.print(f"[dim]ssh available: {escape(target.ssh_command)}[/]")
     attach(target.share_url, open_browser=open_browser)
 
 
@@ -694,7 +698,7 @@ def bench(
 ) -> None:
     """Measure the link, and estimate how long real transfers will take."""
     token = cluster_token()
-    console.print(f"Benchmarking [cyan]{url}[/] ...")
+    console.print(f"Benchmarking [cyan]{escape(url)}[/] ...")
     try:
         link = benchmark_link(url, token, rtt_samples=samples, payload_mb=payload_mb)
     except httpx.HTTPError as exc:
@@ -788,7 +792,9 @@ def _require_token() -> str:
 
 @cluster_app.command("coordinator")
 def cluster_coordinator(
-    host: str = typer.Option("0.0.0.0", help="Bind address."),
+    host: str = typer.Option(
+        "", help="Bind address. Default: this machine's Tailscale IP, not 0.0.0.0."
+    ),
     port: int = typer.Option(8899, help="Port to listen on."),
 ) -> None:
     """Run the meeting point every GPU syncs against.
@@ -796,22 +802,41 @@ def cluster_coordinator(
     Run this on the machine WITHOUT a GPU -- your Mac. It never loads a model;
     it only holds a barrier and averages weights, so the least useful machine
     for training is the right one for the job.
+
+    Binds to the Tailscale address by default, the same way 'share' binds the
+    notebook port. Weights in flight are your model; 0.0.0.0 would put them on
+    the coffee-shop Wi-Fi behind nothing but a token.
     """
     _require_token()
     from p2pgpu.cluster.coordinator import serve as run_coordinator
+    from p2pgpu.worker.share import bracket_host
 
     ips = _tailscale_ips()
-    console.print(f"coordinator listening on {host}:{port}")
+    if not host:
+        if not ips:
+            console.print(
+                "[red]No Tailscale address on this machine.[/] The GPU machines "
+                "reach the coordinator over the tailnet, so it needs one.\n"
+                "Check [cyan]tailscale status[/], or pass [cyan]--host 0.0.0.0[/] "
+                "if you really mean to listen on every interface."
+            )
+            raise typer.Exit(1)
+        host = ips[0]
+
+    # escape(): rich reads square brackets as markup tags, so a bracketed IPv6
+    # literal silently prints as an empty string. Same bracket bug as the -p
+    # flag, in a different disguise.
+    console.print(f"coordinator listening on {escape(bracket_host(host))}:{port}")
+    if host == "0.0.0.0":  # explicit opt-in only; the warning below is the point
+        console.print(
+            "[yellow]Listening on every interface, including your local network.[/] "
+            "Only the token protects it there."
+        )
+
     if ips:
         console.print("\nPoint each GPU machine at one of these:")
         for addr in ips:
-            shown = f"[{addr}]" if ":" in addr else addr
-            console.print(f"  [cyan]http://{shown}:{port}[/]")
-    else:
-        console.print(
-            "[yellow]No Tailscale address found.[/] The GPU machines need one to "
-            "reach this coordinator -- check [cyan]tailscale status[/]."
-        )
+            console.print(f"  [cyan]http://{escape(bracket_host(addr))}:{port}[/]")
     run_coordinator(host=host, port=port)
 
 
