@@ -134,7 +134,56 @@ handling — finding `tailscale.exe` off `PATH`, normalising paths for Docker's
 `-v` — that never runs under WSL. The install and verify sections were also
 Unix-only; both now have a Windows track.
 
-### Re-run with a working control — the conclusion holds after all
+### Retracted a second time — the "control" was still not a control
+
+The section below concluded the WSL2 question was settled. **It was not, and the
+error was the same one twice.** Later the same day, the friend's *host* — not a
+container, plain Windows with Tailscale — also timed out reaching the
+coordinator:
+
+```
+This machine cannot reach the coordinator either: timed out
+```
+
+A container being blocked is a WSL2 story. The bare host being blocked is not.
+Both point at the far end.
+
+What I used as a control was the Mac curling **its own** Tailscale address. That
+connection never leaves the machine, so it does not exercise inbound filtering
+at all. It is the same shape of mistake as the first retraction: treating a
+local success as evidence of remote reachability.
+
+**The actual cause, from `tailscale status --json`:** the two machines belong to
+*different accounts*.
+
+```
+Self : Gaddam's MacBook Pro  100.65.244.36     shivateja1665@gmail.com
+Peer : Loq                   100.102.129.101   motupallibhanu793-design@github
+```
+
+That is cross-account **node sharing**, and node sharing is directional. The
+friend's `Loq` was shared into this tailnet, so the Mac reaches it — `tailscale
+ping` succeeds via DERP(blr), 66–216 ms. The Mac was never shared the other way,
+so nothing on `Loq` can open a connection to it. Every observation fits:
+
+```
+Mac       -> Loq:8888              OK        the shared direction
+Loq host  -> Mac:8899              timeout   never shared this way
+Loq ctr   -> Mac:8899              timeout   same reason, not WSL2
+Loq ctr   -> Loq host / internet   OK        never involved the Mac
+```
+
+**So the WSL2 question is open for the third time, and is now untestable until
+the sharing is fixed** — every probe of it so far has been measuring the return
+path instead.
+
+**Method note worth keeping:** a reachability claim needs a prober on the far
+side of the boundary being tested. Both retractions came from probing the near
+side and inferring the far one.
+
+---
+
+### The earlier (superseded) reasoning
 
 Allowed the venv's Python through the firewall (it was listed explicitly as
 *Block incoming connections*; the global "block all" toggle was necessary but

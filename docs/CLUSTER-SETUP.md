@@ -107,6 +107,39 @@ tailscale status
 
 Every machine in the cluster must appear, and none should say `offline`.
 
+### Everyone on one tailnet — not "shared" devices
+
+This one costs hours if you get it wrong, because everything *looks* connected.
+
+Tailscale has two different ways for machines to see each other:
+
+| | Reachability |
+|---|---|
+| **Same tailnet** (one account, or invited users) | ✅ every machine reaches every machine |
+| **Node sharing** (across accounts) | ⚠️ **one direction only** |
+
+A shared device is reachable *by* the person it was shared with. It does **not**
+gain the ability to reach back. So you can open your friend's notebook while
+their machine cannot reach your coordinator — and every symptom points at the
+wrong end.
+
+Check whose account each machine belongs to:
+
+```bash
+tailscale status --json
+```
+
+Look at `Self.UserID` and each peer's `UserID`. **If they differ, you are on
+shared devices and the cluster will not form.**
+
+Two ways to fix it:
+
+- **Best:** put every machine on one tailnet. `p2pgpu invite` / `p2pgpu join`
+  does this — the auth key in the code enrols the machine as a member of *your*
+  tailnet rather than sharing it across accounts.
+- **Or:** in the Tailscale admin console, share the **coordinator machine** to
+  the other users as well, so the sharing goes both ways.
+
 ---
 
 # Part 2 — GPU machines only
@@ -324,18 +357,19 @@ import urllib.request; print(urllib.request.urlopen("http://100.x.y.z:8899/healt
 - ✅ Prints `{"ok":true,...}` → carry on to 5.4
 - ❌ Times out → do **5.3b** first
 
-> **On Windows, expect this to time out — you will need 5.3b.** Measured inside
-> a real session container on a Windows 11 + WSL2 host, against a coordinator
-> confirmed reachable at the time:
+> **If it times out, the cause is usually on the coordinator's side, not the
+> container's.** In order of likelihood:
 >
-> ```
-> pypi.org:443                        OK        60 ms   internet fine
-> 100.102.129.101:8888  (its own host) OK         3 ms   own host fine
-> 100.65.244.36:8899    (the Mac)      BLOCKED  timeout  another machine: no
-> ```
+> 1. **The GPU machine is on a different Tailscale account**, joined by *node
+>    sharing*. Sharing is directional: sharing their machine to you does not let
+>    their machine reach yours. See "Everyone on one tailnet" below.
+> 2. **A firewall on the coordinator** (Part 3).
+> 3. **Only then** the WSL2 container issue that 5.3b fixes.
 >
-> **But check the coordinator's firewall first anyway** (Part 3) — it produces
-> an identical timeout, and it is the cause you can fix in ten seconds.
+> Tell them apart in one step: on the **GPU machine itself**, outside any
+> container, run `curl http://100.x.y.z:8899/health`. If the host cannot reach
+> it either, the problem is 1 or 2, and the relay will not help — it forwards
+> over that same host connection.
 
 ### 5.3b If it still times out — start the relay
 
