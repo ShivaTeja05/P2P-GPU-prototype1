@@ -343,11 +343,15 @@ The container's host is the WSL2 virtual machine, which does not carry the
 Windows Tailscale interface. The relay forwards from an address the container
 *can* reach, out over the machine's own Tailscale connection.
 
-On that GPU machine, in a second terminal:
+On that GPU machine — **Windows:** double-click `Start-Relay.bat` and paste the
+coordinator URL when it asks. **Linux:** in a second terminal:
 
 ```bash
 p2pgpu cluster relay --coordinator http://100.x.y.z:8899
 ```
+
+Leave it running for the whole session. It is a separate window from the share —
+do **not** stop your share to start it.
 
 > Windows Defender Firewall will ask to allow it the first time. Allow it on
 > **private networks**, or the container still will not get through.
