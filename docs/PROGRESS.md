@@ -134,14 +134,46 @@ handling — finding `tailscale.exe` off `PATH`, normalising paths for Docker's
 `-v` — that never runs under WSL. The install and verify sections were also
 Unix-only; both now have a Windows track.
 
+### Re-run with a working control — the conclusion holds after all
+
+Allowed the venv's Python through the firewall (it was listed explicitly as
+*Block incoming connections*; the global "block all" toggle was necessary but
+not sufficient), confirmed the control, then re-probed from the same container:
+
+```
+CONTROL    Mac coordinator, from the Mac's own tailnet IP   {"ok":true,...}   ✓
+
+container -> 100.65.244.36:8899    (the Mac)        BLOCKED   timeout
+container -> 100.102.129.101:8888  (its own host)   OK          3 ms
+container -> pypi.org:443                           OK         60 ms
+```
+
+So the original reading was right, and is now earned rather than assumed: **a
+container on a Windows host cannot reach another machine's Tailscale address**,
+while reaching its own host's tailnet address and the public internet fine. The
+relay is required on Windows, not a contingency.
+
+The mechanism this implies: packets from the container do arrive at Windows —
+that is why its own `100.102.129.101` answers — but Windows does not forward
+packets destined for *other* tailnet addresses arriving from the WSL2 NAT.
+
+That is also exactly the asymmetry the relay is built on, so every leg of the
+relayed path is now individually measured except the relay's own listener:
+
+```
+container -> host's own tailnet IP     3 ms, measured
+host      -> Mac over Tailscale        measured in reverse (Mac reaches host:8888)
+```
+
+**Caveat, stated rather than glossed:** the friend's *host* reaching the Mac was
+not measured directly — only the Mac reaching the host. Tailscale sessions are
+bidirectional once established, so this is a safe inference, but it is an
+inference.
+
 **Next:**
-1. Allow incoming connections to the coordinator on the Mac. Nothing works
-   until this is done, and it is invisible from the other side.
-2. Re-run the container reachability probe with a coordinator that can actually
-   answer. Only then is the WSL2 question settled either way.
-3. Whether a relay on the friend's machine is reachable from its own container
-   at `100.102.129.101:8899` — implied by the 3 ms result on port 8888, but not
-   run, because that machine still has the pre-cluster code.
+1. Get the cluster code onto the friend's machine so `p2pgpu cluster relay` can
+   run there, then confirm the container reaches it at `100.102.129.101:8899`.
+2. Two nodes training for real.
 
 ---
 

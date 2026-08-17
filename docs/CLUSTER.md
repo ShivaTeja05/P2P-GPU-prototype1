@@ -191,16 +191,22 @@ WORLD_SIZE  = 2
 
 Run both cells. The first one to start waits for the second.
 
-> **If a notebook says `Could not reach the coordinator`, this is the fix.**
+> **On Windows this step fails, and here is the fix.** Measured inside a real
+> session container against a coordinator confirmed reachable at the time:
 >
-> The GPU machine may be on the tailnet while the *container* is not. On Windows
-> the container's host is the WSL2 VM, and the Windows Tailscale interface does
-> not live there — so `100.x.y.z` may have no route from inside the container
-> even though the machine itself reaches it fine.
+> ```
+> pypi.org:443                        OK        60 ms   ← internet fine
+> 100.102.129.101:8888 (its own host) OK         3 ms   ← own host fine
+> 100.65.244.36:8899   (the Mac)      BLOCKED  timeout ← another machine: no
+> ```
 >
-> **Check the coordinator's own machine first.** A firewall there produces an
-> identical symptom, and it is the more common cause. On macOS, "Block all
-> incoming connections" silently drops everything; see the setup guide.
+> The GPU machine is on the tailnet; the *container* is not. Its host is the
+> WSL2 VM, and the Windows Tailscale interface does not live there. Packets do
+> reach Windows — that is why its own address answers — but Windows will not
+> forward them onward to another tailnet address.
+>
+> **Rule out the coordinator's firewall first**, which gives an identical
+> timeout and is far quicker to fix; see the setup guide.
 >
 > On that friend's machine, in a second terminal:
 >

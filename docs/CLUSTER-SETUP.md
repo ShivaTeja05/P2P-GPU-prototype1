@@ -324,11 +324,18 @@ import urllib.request; print(urllib.request.urlopen("http://100.x.y.z:8899/healt
 - ✅ Prints `{"ok":true,...}` → carry on to 5.4
 - ❌ Times out → do **5.3b** first
 
-> **If it times out, check the coordinator's machine before blaming Windows.**
-> A firewall on the coordinator gives exactly the same symptom, and it is the
-> more likely cause — see Part 3. Measured inside a real session container, the
-> public internet and the container's own host were both reachable, so the
-> container's networking is not broken in general.
+> **On Windows, expect this to time out — you will need 5.3b.** Measured inside
+> a real session container on a Windows 11 + WSL2 host, against a coordinator
+> confirmed reachable at the time:
+>
+> ```
+> pypi.org:443                        OK        60 ms   internet fine
+> 100.102.129.101:8888  (its own host) OK         3 ms   own host fine
+> 100.65.244.36:8899    (the Mac)      BLOCKED  timeout  another machine: no
+> ```
+>
+> **But check the coordinator's firewall first anyway** (Part 3) — it produces
+> an identical timeout, and it is the cause you can fix in ten seconds.
 
 ### 5.3b If it still times out — start the relay
 
