@@ -767,5 +767,255 @@ def _render_caps(caps: NodeCapabilities) -> None:
     console.print(f"usable VRAM: [bold green]{_fmt_gb(caps.usable_vram_mb)}[/]")
 
 
+# ---------------------------------------------------------------------------
+# Cluster: several GPUs, one training run
+# ---------------------------------------------------------------------------
+
+cluster_app = typer.Typer(
+    help="Train one model across several GPUs in different houses.",
+    no_args_is_help=True,
+)
+app.add_typer(cluster_app, name="cluster")
+
+
+def _require_token() -> str:
+    token = cluster_token()
+    if token is None:
+        console.print("[red]No cluster token. Run 'p2pgpu init' or 'p2pgpu join <code>'.[/]")
+        raise typer.Exit(1)
+    return token
+
+
+@cluster_app.command("coordinator")
+def cluster_coordinator(
+    host: str = typer.Option("0.0.0.0", help="Bind address."),
+    port: int = typer.Option(8899, help="Port to listen on."),
+) -> None:
+    """Run the meeting point every GPU syncs against.
+
+    Run this on the machine WITHOUT a GPU -- your Mac. It never loads a model;
+    it only holds a barrier and averages weights, so the least useful machine
+    for training is the right one for the job.
+    """
+    _require_token()
+    from p2pgpu.cluster.coordinator import serve as run_coordinator
+
+    ips = _tailscale_ips()
+    console.print(f"coordinator listening on {host}:{port}")
+    if ips:
+        console.print("\nPoint each GPU machine at one of these:")
+        for addr in ips:
+            shown = f"[{addr}]" if ":" in addr else addr
+            console.print(f"  [cyan]http://{shown}:{port}[/]")
+    else:
+        console.print(
+            "[yellow]No Tailscale address found.[/] The GPU machines need one to "
+            "reach this coordinator -- check [cyan]tailscale status[/]."
+        )
+    run_coordinator(host=host, port=port)
+
+
+def _tailscale_ips() -> list[str]:
+    """This machine's overlay addresses, which are the reachable ones."""
+    import subprocess
+
+    from p2pgpu.common.discovery import _tailscale_exe
+
+    exe = _tailscale_exe()
+    if not exe:
+        return []
+    out = []
+    for flag in ("-4", "-6"):
+        try:
+            result = subprocess.run(
+                [exe, "ip", flag], capture_output=True, text=True, timeout=10, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            out.extend(line.strip() for line in result.stdout.splitlines() if line.strip())
+    return out
+
+
+@cluster_app.command("status")
+def cluster_status(
+    coordinator: str = typer.Option(..., help="Coordinator URL, e.g. http://100.x.y.z:8899"),
+) -> None:
+    """Who has joined, and which round they are waiting on."""
+    token = _require_token()
+    try:
+        resp = httpx.get(
+            f"{coordinator.rstrip('/')}/v1/cluster/status",
+            headers={AUTH_HEADER: token},
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Could not reach the coordinator: {exc}[/]")
+        raise typer.Exit(1) from exc
+
+    data = resp.json()
+    table = Table(title="Cluster", show_header=False)
+    table.add_row("world size", str(data.get("world_size", 0)))
+    table.add_row("members", ", ".join(data.get("members") or []) or "[dim]none[/]")
+    table.add_row("round", str(data.get("round")) if data.get("round") is not None else "[dim]-[/]")
+    table.add_row("waiting for", str(data.get("waiting_for", 0)))
+    console.print(table)
+
+
+@cluster_app.command("plan")
+def cluster_plan(
+    layers: int = typer.Option(..., help="Transformer blocks in the model."),
+    params: float = typer.Option(..., help="Total parameters, in billions."),
+    gpu: list[str] = typer.Option(
+        ..., "--gpu", help="Repeatable: name:free_gb, e.g. --gpu rtx4050:5 --gpu rtx4080:15"
+    ),
+    dtype: str = typer.Option("float16", help="float32 | float16 | bfloat16 | int8 | int4"),
+) -> None:
+    """Show how a model would be cut across these GPUs (PIPELINE mode).
+
+    Planning only -- this tells you whether a model *could* fit across the
+    cluster's combined VRAM. Running it that way is a separate, unfinished path;
+    see 'p2pgpu cluster train' for the mode that works today.
+    """
+    from p2pgpu.cluster.plan import PlanError, describe, plan_split
+
+    nodes = []
+    for entry in gpu:
+        if ":" not in entry:
+            console.print(f"[red]--gpu wants name:free_gb, got {entry!r}[/]")
+            raise typer.Exit(1)
+        name, _, free = entry.rpartition(":")
+        try:
+            nodes.append((name, int(float(free) * 1024)))
+        except ValueError:
+            console.print(f"[red]Not a number: {free!r} in {entry!r}[/]")
+            raise typer.Exit(1) from None
+
+    try:
+        specs = plan_split(nodes, layers, int(params * 1e9), dtype=dtype)
+    except PlanError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    console.print(describe(specs))
+
+
+@cluster_app.command("estimate")
+def cluster_estimate(
+    params: float = typer.Option(..., help="Total parameters, in millions."),
+    upload_mbps: float = typer.Option(..., help="Your measured upload (p2pgpu bench)."),
+    download_mbps: float = typer.Option(..., help="Your measured download."),
+    sync_every: int = typer.Option(200, help="Local steps between syncs."),
+    step_ms: float = typer.Option(100.0, help="How long one training step takes."),
+) -> None:
+    """What weight-averaging will cost on your link, before you commit to a run."""
+    from p2pgpu.cluster.trainer import estimate_sync_cost
+
+    cost = estimate_sync_cost(int(params * 1e6), upload_mbps, download_mbps)
+    train_s = sync_every * step_ms / 1000
+    sync_s = cost["round_trip_s"] or 0.0
+    overhead = sync_s / (train_s + sync_s) if (train_s + sync_s) else 0.0
+
+    table = Table(title="One sync round", show_header=False)
+    table.add_row("weights on the wire", f"{cost['payload_mb']} MB each way")
+    table.add_row("upload", f"{cost['upload_s']} s")
+    table.add_row("download", f"{cost['download_s']} s")
+    table.add_row("training between syncs", f"{train_s:.0f} s ({sync_every} steps)")
+    table.add_row("sync overhead", f"[bold]{overhead * 100:.0f}%[/]")
+    console.print(table)
+
+    if overhead > 0.25:
+        better = int(sync_every * (overhead / 0.1))
+        console.print(
+            f"[yellow]That is a lot of stall.[/] Raise --sync-every to about "
+            f"{better} to get it near 10%. Weights are averaged less often, "
+            "which costs a little convergence and buys a lot of wall clock."
+        )
+    else:
+        console.print("[green]The link is not your bottleneck at this sync interval.[/]")
+
+
+@cluster_app.command("relay")
+def cluster_relay(
+    coordinator: str = typer.Option(..., help="Coordinator URL, e.g. http://100.x.y.z:8899"),
+    listen_port: int = typer.Option(8899, help="Port for the container to connect to."),
+    listen_host: str = typer.Option("0.0.0.0", help="Bind address."),
+) -> None:
+    """Let the session container reach the coordinator. Run on the GPU machine.
+
+    Only needed if the training script inside the notebook cannot reach the
+    coordinator's Tailscale address. That happens on Windows, where the
+    container's host is the WSL2 VM rather than Windows itself, so the Windows
+    Tailscale interface is not visible to it.
+
+    With this running, point the script at http://host.docker.internal:8899
+    instead of the coordinator's 100.x address.
+    """
+    from p2pgpu.cluster.relay import RelayError, reachable
+    from p2pgpu.cluster.relay import serve as run_relay
+
+    token = _require_token()
+    ok, detail = reachable(coordinator, token)
+    if not ok:
+        console.print(f"[red]This machine cannot reach the coordinator either: {detail}[/]")
+        console.print(
+            "The relay forwards over [bold]this machine's[/] Tailscale connection, so "
+            "it has to work here first. Check [cyan]tailscale status[/]."
+        )
+        raise typer.Exit(1)
+    console.print("[green]Coordinator reachable from this machine.[/] Relaying it inward.")
+
+    try:
+        run_relay(
+            coordinator_url=coordinator,
+            listen_host=listen_host,
+            listen_port=listen_port,
+            on_event=console.print,
+        )
+    except RelayError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+
+
+@cluster_app.command("demo")
+def cluster_demo(
+    coordinator: str = typer.Option(..., help="Coordinator URL, e.g. http://100.x.y.z:8899"),
+    world_size: int = typer.Option(2, help="How many GPU machines are joining."),
+    rounds: int = typer.Option(5, help="Sync rounds to run."),
+    sync_every: int = typer.Option(20, help="Local steps between syncs."),
+    device: str = typer.Option("auto", help="cuda | cpu | auto"),
+    as_node: str = typer.Option(
+        "", "--as", help="Override this node's id, to rehearse a cluster on one machine."
+    ),
+) -> None:
+    """Prove the cluster trains, before you trust it with a real model.
+
+    Run this on every GPU machine at once. Each trains a small model on its own
+    shard of synthetic data. Two things prove it worked: the loss falls, and
+    every machine prints the *same* weight checksum -- which it can only do if
+    the weights really were averaged across the internet.
+
+    To rehearse without friends, open two terminals on one machine and pass
+    --as node-a and --as node-b. Same code path, same proof, no GPUs needed.
+    """
+    from p2pgpu.cluster.demo import run_demo
+
+    token = _require_token()
+    try:
+        run_demo(
+            coordinator_url=coordinator,
+            token=token,
+            node_id=as_node.strip() or node_id(),
+            world_size=world_size,
+            rounds=rounds,
+            sync_every=sync_every,
+            device=device,
+            console=console,
+        )
+    except Exception as exc:  # surfaced with a message, not a traceback
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+
+
 if __name__ == "__main__":
     app()

@@ -63,6 +63,37 @@ Things a test suite never would have caught:
 
 ---
 
+## Unreleased — branch `v2.0-cluster`
+
+Two GPUs, one training run. Proven locally; not yet run on two real GPUs.
+
+### Added
+- `p2pgpu cluster coordinator` — the meeting point nodes sync against. Never
+  loads a model, so it runs on the GPU-less Mac
+- `p2pgpu cluster demo` — proves a cluster combined, by printing a weight
+  checksum that can only match across machines if the averaging round-tripped.
+  `--as <name>` rehearses a whole cluster on one machine
+- `p2pgpu cluster relay` — forwards the coordinator into the session container,
+  for Windows hosts where the container's host is the WSL2 VM and cannot see
+  the Windows Tailscale interface
+- `p2pgpu cluster plan` — how a model would be cut across mismatched GPUs
+- `p2pgpu cluster estimate` — what a sync round costs on a measured link
+- `p2pgpu cluster status` — who has joined, which round they are on
+- `cluster/trainer.py` — `ClusterTrainer`, the local-SGD loop; `shard()` for
+  splitting data by rank; `estimate_sync_cost()`
+- `examples/cluster_train.py` — MNIST across two GPUs, stdlib-only so it runs
+  inside the session container where `p2pgpu` is not installed
+- `docs/CLUSTER.md` — the walkthrough, including what does *not* pool
+
+### Notes
+- **Only AVERAGE mode can train.** PIPELINE (splitting one model across cards)
+  runs a forward pass and is numerically exact, but training through it needs
+  gradients sent back up the stages, which is not built
+- VRAM does not pool transparently, and RAM/disk/CPU do not pool at all. What
+  combines is compute. `docs/CLUSTER.md` opens with the table
+
+---
+
 ## Unreleased — branch `v1.1-authkey`
 
 ### Added

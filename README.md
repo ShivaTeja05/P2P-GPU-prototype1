@@ -175,9 +175,21 @@ to.** Details and the full threat model in [docs/SECURITY.md](docs/SECURITY.md).
 - Upload speed, not GPU speed, decides how long moving datasets and checkpoints takes.
 - `--shm-size` is set to 8 GB because PyTorch dataloaders fail on Docker's 64 MB default.
 
+## Using more than one GPU at once
+
+Two friends' GPUs can train one model together — see
+**[docs/CLUSTER.md](docs/CLUSTER.md)**. Read the first section before you start:
+compute pools across machines, but VRAM only pools by splitting the model
+deliberately, and RAM, disk and CPU do not pool at all.
+
+```bash
+p2pgpu cluster coordinator
+```
+
 ## Status
 
-Working and tested end to end for the two-machine case. See
+Working and tested end to end for the two-machine case. Clustering works
+locally and has not yet been run on two real GPUs. See
 [docs/PROGRESS.md](docs/PROGRESS.md) for the running log.
 
 MIT licensed.

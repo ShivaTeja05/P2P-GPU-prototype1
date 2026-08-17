@@ -30,6 +30,12 @@ Entry format:
 | One-code join (`invite` / `join`) | done, untested on a live tailnet |
 | Background agent as an OS service | done, verified on macOS |
 | Released | **v1.0.0 tagged** |
+| Cluster — layer placement (`plan.py`) | done |
+| Cluster — pipeline stage forward pass | done, numerically exact; **inference only** |
+| Cluster — coordinator (weight averaging) | done |
+| Cluster — trainer client (`trainer.py`) | **done — two nodes train one model** |
+| Cluster — real run on two friends' GPUs | not yet |
+| Cluster — training *through* a pipeline split | not built (needs backward pass) |
 
 **Machines**
 
@@ -37,6 +43,77 @@ Entry format:
 |---|---|---|---|
 | guest | MacBook Pro M3 Pro, 36 GB | mps | control machine |
 | host | Lenovo LOQ, RTX 4050 Laptop 6 GB, Win 11 | cuda | working |
+
+---
+
+## 2026-08-17 — Two machines train one model
+
+**Status:** AVERAGE mode is end-to-end complete and proven locally. The
+coordinator had existed since yesterday with nothing to talk to; this is the
+half that trains.
+
+**Changed:**
+- `cluster/trainer.py` — `ClusterTrainer`: rendezvous, weight exchange, the
+  local-SGD loop. `shard()` / `sharded_batches()` for splitting data by rank,
+  `estimate_sync_cost()` for sizing a round against a measured link.
+- `cluster/demo.py` — `p2pgpu cluster demo`, a run small enough to debug that
+  proves the cluster combined rather than merely trained.
+- CLI gained a `cluster` sub-app: `coordinator`, `status`, `plan`, `estimate`,
+  `demo`. Before this, none of the cluster code was reachable from the CLI.
+- `examples/cluster_train.py` — MNIST across two GPUs, for the Jupyter notebook.
+- `docs/CLUSTER.md` — the walkthrough, including what does *not* pool.
+
+**Why (decisions worth recording):**
+
+- *Weight checksums, not loss curves, are the proof.* A node training entirely
+  alone shows a falling loss too. Nodes start from different seeds on disjoint
+  shards, so matching checksums can only happen if the average round-tripped.
+  This is the single most valuable line of output in the whole feature — without
+  it, a broken cluster looks exactly like a working one.
+- *`join()` blocks until the world is full before returning a rank.* The
+  coordinator ranks members by sorting ids, so the rank handed to the first
+  joiner is provisional. Data is sharded by rank, so acting on a provisional
+  rank would silently give two nodes the same data — a bug that shows up as
+  "clustering didn't help much", never as an error.
+- *Sharding is strided, not contiguous.* Datasets arrive ordered more often than
+  people expect. A contiguous split hands one node a biased sample.
+- *Optimizer state stays local.* Momentum describes the path a node took through
+  its own data; averaging mixes trajectories that were never comparable. Also
+  halves what crosses the wire.
+- *The example is stdlib-only.* `p2pgpu` is not installed inside the session
+  container, so the notebook script talks to the coordinator with `urllib`
+  rather than assuming an import that isn't there.
+- *Checksums are rounded to 4 decimals before hashing.* Float averaging can land
+  two machines a few ULPs apart on the same mean, and a raw byte hash would send
+  someone debugging a network that is fine.
+
+**Measured:** 91 tests pass (15 new). Two nodes against a real coordinator over
+a real socket, different seeds, disjoint MNIST shards:
+
+```
+                node friend-a          node friend-b
+before sync     01658692ac0c           b5efc36ede6c     <- genuinely apart
+round 0         e61012befa35           e61012befa35
+round 1         5edd1f791830           5edd1f791830
+round 2         85c6a07eee44           85c6a07eee44     <- identical
+```
+
+Synthetic demo over 4 rounds: loss 39.5 -> 0.72, checksums identical throughout.
+
+**Known limits:**
+- Never run on two *real* GPUs in two houses. Local only so far.
+- PIPELINE mode still cannot train. Forward pass only.
+- Both nodes run the same number of local steps, so a slow GPU sets the pace.
+- No resume: a node dropping mid-round fails the round.
+
+**Next:**
+1. Two friends share (`p2pgpu share`), Mac runs the coordinator, run
+   `examples/cluster_train.py` in both notebooks. Compare checksums.
+2. Record the real sync overhead — home upload is the binding constraint and
+   the estimate is currently theoretical.
+3. Still unproven: whether container A can reach a port container B publishes
+   on its Tailscale IP. AVERAGE mode does not need it (both containers only
+   dial *out* to the coordinator), but PIPELINE mode does.
 
 ---
 
