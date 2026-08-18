@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv tool run ruff@0.16.3 check p2pgpu tests examples
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+      # CPU wheels only. The GPU is never exercised in CI -- what these tests
+      # protect is the maths and the plumbing, both of which are device-agnostic.
+      - name: Install torch (CPU)
+        run: uv pip install --system --index-url https://download.pytorch.org/whl/cpu torch
+      - name: Install transformers
+        run: uv pip install --system transformers
+      - name: Test
+        run: python -m pytest -q

@@ -1,6 +1,24 @@
 # p2pgpu
 
-Share one GPU between two computers over the internet.
+[![CI](https://github.com/ShivaTeja05/P2P-GPU-prototype1/actions/workflows/ci.yml/badge.svg)](https://github.com/ShivaTeja05/P2P-GPU-prototype1/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.12-blue.svg)](pyproject.toml)
+
+**Share one GPU between two computers over the internet.**
+
+Verified end to end on real hardware — a MacBook in one state running PyTorch on
+an RTX 4050 in another:
+
+```
+GPU          : NVIDIA GeForce RTX 4050 Laptop GPU
+torch        : 2.5.1+cu124 | cuda 12.4
+matmul == cpu: True
+fp16 4096^3  : 21.4 TFLOP/s
+MNIST CNN    : 98.87% accuracy, 3.6 s/epoch
+link         : Tailscale, encrypted, no open ports
+```
+
+That output was printed on the Mac. It was computed 500 km away.
 
 Your friend has a good GPU. You have a laptop that doesn't. `p2pgpu share` hands
 their GPU to you for a few hours — you get a notebook running on their hardware,

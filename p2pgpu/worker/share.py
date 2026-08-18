@@ -99,7 +99,7 @@ class ShareSession:
 
 
 def _run(cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
 
 
 # --------------------------------------------------------------------------
@@ -404,7 +404,7 @@ def pull_image(image: str, timeout_s: int = 7200) -> None:
         return
     try:
         # No capture_output: docker's progress goes straight to the terminal.
-        result = subprocess.run(["docker", "pull", image], timeout=timeout_s)
+        result = subprocess.run(["docker", "pull", image], timeout=timeout_s, check=False)
     except subprocess.TimeoutExpired as exc:
         raise ShareError(
             f"Image pull exceeded {timeout_s // 60} minutes. The download may "

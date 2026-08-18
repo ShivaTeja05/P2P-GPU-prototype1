@@ -7,9 +7,9 @@ import pytest
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 
-from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: E402
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from p2pgpu.cluster.stage import (  # noqa: E402
+from p2pgpu.cluster.stage import (
     StageError,
     block_kwargs,
     embed_inputs,

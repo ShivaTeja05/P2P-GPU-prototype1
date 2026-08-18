@@ -30,3 +30,8 @@ packages = ["p2pgpu"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+# Typer's whole API is `def cmd(x: int = typer.Option(...))`. B008 fires on every
+# command in the CLI and there is no way to write Typer without it.
+ignore = ["B008"]

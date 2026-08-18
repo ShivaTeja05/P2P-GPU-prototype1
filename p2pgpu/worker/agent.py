@@ -128,7 +128,7 @@ def port_owner(port: int, host: str = "127.0.0.1") -> str | None:
         resp = httpx.get(f"http://{host}:{port}/health", timeout=3)
         if resp.status_code == 200 and "node_id" in resp.json():
             return "p2pgpu"
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - any failure means "not a p2pgpu agent"
         pass
     return "other"
 

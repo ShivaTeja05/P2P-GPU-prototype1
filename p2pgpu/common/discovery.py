@@ -71,7 +71,8 @@ def list_peers(include_offline: bool = False) -> list[Peer]:
         return []
     try:
         result = subprocess.run(
-            [exe, "status", "--json"], capture_output=True, text=True, timeout=20
+            [exe, "status", "--json"], capture_output=True, text=True, timeout=20,
+            check=False,
         )
     except (subprocess.SubprocessError, OSError):
         return []

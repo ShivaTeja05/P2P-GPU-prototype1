@@ -1,0 +1,27 @@
+name: Something broke
+description: A step failed, or it did not do what the docs said.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most problems are environment, not code. `p2pgpu doctor` output tells us
+        more than a description does — please paste it.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `p2pgpu doctor`
+      description: On Windows, the contents of check-setup-output.txt.
+      render: shell
+    validations: {required: true}
+  - type: input
+    id: role
+    attributes:
+      label: Which side are you on?
+      placeholder: sharing my GPU / borrowing one / running the coordinator
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes:
+      label: What you ran, and what happened
+      description: The exact command and the exact error, not a summary of it.
+    validations: {required: true}

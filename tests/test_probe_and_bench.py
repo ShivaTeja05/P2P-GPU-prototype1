@@ -79,8 +79,8 @@ def test_transfer_table_reports_unknown_rather_than_lying():
 
 def test_transfer_table_uses_the_right_direction():
     """Uploads must be priced with upload speed, downloads with download speed."""
-    rows = dict((label, human) for label, _size, human in
-                transfer_estimates(upload_mbps=8, download_mbps=800))
+    rows = {label: human for label, _size, human in
+            transfer_estimates(upload_mbps=8, download_mbps=800)}
     # 1 GB up at 8 Mbps is slow; 5 GB down at 800 Mbps is fast.
     assert rows["push a 1 GB dataset"].endswith("min")
     assert rows["pull back a 5 GB fine-tuned model"].endswith("s")

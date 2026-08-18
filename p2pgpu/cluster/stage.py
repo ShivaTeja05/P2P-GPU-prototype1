@@ -204,11 +204,10 @@ def load_stage(config: StageConfig) -> dict:
         if index not in keep:
             layers[index] = None
 
-    if not config.is_last:
-        # Only the final stage needs the head; it is often the single largest
-        # tensor in the model (vocab x hidden), so dropping it matters.
-        if hasattr(model, "lm_head"):
-            model.lm_head = torch.nn.Identity()
+    # Only the final stage needs the head; it is often the single largest
+    # tensor in the model (vocab x hidden), so dropping it matters.
+    if not config.is_last and hasattr(model, "lm_head"):
+        model.lm_head = torch.nn.Identity()
 
     model.to(config.device)
 

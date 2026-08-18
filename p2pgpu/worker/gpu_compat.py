@@ -127,6 +127,7 @@ def detect_gpus() -> list[GpuProfile]:
             ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
+            check=False,
             timeout=20,
         )
     except (subprocess.SubprocessError, OSError):
