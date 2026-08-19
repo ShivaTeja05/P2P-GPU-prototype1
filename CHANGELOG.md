@@ -63,7 +63,10 @@ Things a test suite never would have caught:
 
 ---
 
-## Unreleased — branch `v2.0-cluster`
+## Unreleased — on `main`, not yet tagged
+
+Merged from `v2.0-cluster`. Untagged on purpose: the cluster has not yet
+completed a run across two machines. It gets a version number the day it does.
 
 Two GPUs, one training run. Proven locally; not yet run on two real GPUs.
 
@@ -99,8 +102,8 @@ Two GPUs, one training run. Proven locally; not yet run on two real GPUs.
 
 ### Notes
 - The session image is a **stock** `pytorch/pytorch:*-runtime`. `docker/` builds
-  a nicer image with jupyterlab and sshd baked in, but nothing references it —
-  its tag is still the `<yourname>/` placeholder, so it is unused
+  a faster one with jupyterlab and sshd baked in; it is opt-in via `--image`
+  and documented in `docker/README.md`, not the default
 - Verified inside the real image: `torch`, `torchvision` and `numpy` are
   present; **`httpx` is not**, which is why `examples/cluster_train.py` uses
   stdlib `urllib`
@@ -112,7 +115,7 @@ Two GPUs, one training run. Proven locally; not yet run on two real GPUs.
 
 ---
 
-## Unreleased — branch `v1.1-authkey`
+## Merged into `main` — from `v1.1-authkey`
 
 ### Added
 - `p2pgpu invite` / `join` — one code carries the Tailscale auth key and the

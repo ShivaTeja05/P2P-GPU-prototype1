@@ -192,6 +192,7 @@ to.** Details and the full threat model in [docs/SECURITY.md](docs/SECURITY.md).
 - Files in `/workspace` persist on the owner's machine after the session ends.
 - Upload speed, not GPU speed, decides how long moving datasets and checkpoints takes.
 - `--shm-size` is set to 8 GB because PyTorch dataloaders fail on Docker's 64 MB default.
+- `docker/` holds an optional prebuilt session image that removes the ~2 min JupyterLab install per share. Not required — see [docker/README.md](docker/README.md).
 
 ## Using more than one GPU at once
 
